@@ -40,6 +40,17 @@ path = [
 SPDX-License-Identifier = "MIT"
 SPDX-FileCopyrightText = "2025 Byron Williams"
 
+# Tooling configuration - MIT
+[[annotations]]
+path = [
+    "pyproject.toml",
+    "REUSE.toml",
+    ".pre-commit-config.yaml",
+    ".secrets.baseline",
+]
+SPDX-License-Identifier = "MIT"
+SPDX-FileCopyrightText = "2025 Byron Williams"
+
 # Documentation - CC-BY-4.0
 [[annotations]]
 path = [
