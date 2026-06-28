@@ -19,6 +19,28 @@ from pathlib import Path
 import yaml
 
 
+def _resolve_lock_path(lock_file: str) -> Path:
+    """Resolve lock_file and confirm it stays inside the current working tree.
+
+    The lock path arrives as a CLI argument and is therefore untrusted. A
+    traversal value (e.g. ``../../etc/passwd``) would otherwise let a faulty or
+    hostile invocation read or overwrite files outside the repository. Resolving
+    against ``cwd`` and asserting containment closes that path-injection vector.
+
+    Raises:
+        SystemExit: If the resolved path escapes the repository root.
+    """
+    base = Path.cwd().resolve()
+    candidate = (base / lock_file).resolve()
+    if candidate != base and base not in candidate.parents:
+        print(
+            f"ERROR: lock file path escapes repository root: {lock_file}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return candidate
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Update catalog/approved-lock.yaml")
     p.add_argument("--lock-file", required=True, help="Path to approved-lock.yaml")
@@ -40,7 +62,7 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
 
-    lock_path = Path(args.lock_file)
+    lock_path = _resolve_lock_path(args.lock_file)
     if not lock_path.exists():
         print(f"ERROR: lock file not found: {lock_path}", file=sys.stderr)
         return 1

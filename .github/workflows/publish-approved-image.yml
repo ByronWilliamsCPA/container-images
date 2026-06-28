@@ -168,11 +168,13 @@ jobs:
 
       # ---- credentials -------------------------------------------------------
 
+      # GITHUB_TOKEN is auto-masked by the runner; only the DHI token needs it.
       - name: Mask registry credentials
+        env:
+          DHI_PASS: ${{ secrets.DHI_REGISTRY_TOKEN }}
         run: |
-          echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
-          if [ -n "${{ secrets.DHI_REGISTRY_TOKEN }}" ]; then
-            echo "::add-mask::${{ secrets.DHI_REGISTRY_TOKEN }}"
+          if [ -n "${DHI_PASS}" ]; then
+            echo "::add-mask::${DHI_PASS}"
           fi
 
       - name: Authenticate crane to registries
@@ -189,9 +191,12 @@ jobs:
           crane auth login ghcr.io --username "${GHCR_USER}" --password "${GHCR_PASS}"
 
       - name: Authenticate Docker to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | \
-            docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          echo "${GHCR_PASS}" | \
+            docker login ghcr.io --username "${GHCR_USER}" --password-stdin
 
       # ---- resolve upstream digest ------------------------------------------
 
@@ -199,11 +204,17 @@ jobs:
         id: resolve
         env:
           PLATFORM: ${{ inputs.platform }}
+          UPSTREAM_REGISTRY: ${{ inputs.upstream_registry }}
+          UPSTREAM_NAME: ${{ inputs.upstream_name }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+          GHCR_NAME: ${{ inputs.ghcr_name }}
+          GHCR_TAG: ${{ inputs.ghcr_tag }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          SOURCE="${{ inputs.upstream_registry }}/${{ inputs.upstream_name }}:${{ inputs.upstream_tag }}"
-          GHCR_REF="ghcr.io/${OWNER}/${{ inputs.ghcr_name }}:${{ inputs.ghcr_tag }}"
-          GHCR_IMAGE="ghcr.io/${OWNER}/${{ inputs.ghcr_name }}"
+          OWNER=$(echo "${REPO_OWNER}" | tr '[:upper:]' '[:lower:]')
+          SOURCE="${UPSTREAM_REGISTRY}/${UPSTREAM_NAME}:${UPSTREAM_TAG}"
+          GHCR_REF="ghcr.io/${OWNER}/${GHCR_NAME}:${GHCR_TAG}"
+          GHCR_IMAGE="ghcr.io/${OWNER}/${GHCR_NAME}"
 
           echo "Resolving digest for ${SOURCE} (platform: ${PLATFORM})..."
           SOURCE_DIGEST=$(crane digest "${SOURCE}" --platform "${PLATFORM}")
@@ -286,6 +297,7 @@ jobs:
         env:
           SNYK_TOKEN: ${{ env.SNYK_TOKEN }}
           TARGET_WITH_DIGEST: ${{ env.ghcr_ref }}@${{ env.target_digest }}
+          IMAGE_ID: ${{ inputs.image_id }}
         run: |
           MEDIUM_COUNT=$(
             snyk container test "${TARGET_WITH_DIGEST}" \
@@ -294,7 +306,7 @@ jobs:
             2>/dev/null || echo "0"
           )
           if [ "${MEDIUM_COUNT}" -gt "0" ]; then
-            MSG="Snyk: ${MEDIUM_COUNT} medium-severity issue(s) in ${{ inputs.image_id }}"
+            MSG="Snyk: ${MEDIUM_COUNT} medium-severity issue(s) in ${IMAGE_ID}"
             echo "::warning::${MSG} (policy: warn, not blocking)."
           else
             echo "Snyk medium check: 0 medium-severity issues."
