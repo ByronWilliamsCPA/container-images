@@ -247,3 +247,56 @@ def test_main_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     ]
     monkeypatch.setattr(sys, "argv", argv)
     assert lsp.main() == 1
+
+
+def test_main_drops_malformed_cve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = _default_policy()
+    policy["exceptions"] = [
+        {
+            "image_id": "dhi-postgres-16",
+            "cve_id": "../../etc/passwd",
+            "scanner": "trivy",
+            "expires": "2026-12-31",
+        },
+    ]
+    rc, outputs, trivyignore = _run_main(tmp_path, monkeypatch, policy)
+    assert rc == 0
+    assert outputs["trivy_exception_count"] == "0"
+    assert "etc/passwd" not in trivyignore.read_text()
+
+
+def test_main_rejects_invalid_image_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rc, _, _ = _run_main(
+        tmp_path, monkeypatch, _default_policy(), image_id="bad id/with slash"
+    )
+    assert rc == 1
+
+
+def test_main_rejects_path_outside_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Constrain the allowed roots to a single dir, then point --policy-file at a
+    # sibling outside it: the containment guard must abort before any file read.
+    allowed = tmp_path / "repo"
+    allowed.mkdir()
+    monkeypatch.setattr(lsp, "_allowed_roots", lambda: [allowed])
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("scanner_policy: {}\n")
+    argv = [
+        "load_scanner_policy.py",
+        "--policy-file",
+        str(outside),
+        "--image-id",
+        "x",
+        "--trivyignore-out",
+        str(allowed / ".trivyignore"),
+        "--github-output",
+        str(allowed / "out"),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit):
+        lsp.main()

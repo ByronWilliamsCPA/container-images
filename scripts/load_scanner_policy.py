@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
+import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -42,20 +44,65 @@ _SEVERITY_ORDER = ["low", "medium", "high", "critical"]
 _BLOCK = "block"
 _VALID_SCANNERS = {"snyk", "trivy", "both"}
 
+# Strict allowlists for the two policy-derived values that get written to disk.
+# Both reject path separators, dot-dot, whitespace, and newlines, so nothing
+# from the policy file can smuggle traversal or injection into .trivyignore.
+# CVE-2021-44228 and GHSA-jfh8-c2jp-5v3q both match _CVE_RE.
+_CVE_RE = re.compile(r"^[A-Za-z0-9-]+$")
+_IMAGE_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+class _PolicyError(Exception):
+    """Raised when the policy file is missing, unreadable, or malformed."""
+
 
 def _fail(message: str) -> int:
     print(f"ERROR: {message}", file=sys.stderr)
     return 1
 
 
+def _allowed_roots() -> list[Path]:
+    """Directories the script may read from or write to.
+
+    The repository checkout (``cwd``) plus the CI runner temp and the system
+    temp dir, which is where ``$GITHUB_OUTPUT`` and test fixtures legitimately
+    live. Anything resolving outside all of these is treated as a traversal.
+    """
+    roots = [Path.cwd()]
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if runner_temp:
+        roots.append(Path(runner_temp))
+    roots.append(Path(tempfile.gettempdir()))
+    return roots
+
+
+def _resolve_within(raw: str, allowed: list[Path]) -> Path:
+    """Resolve ``raw`` and confirm it stays inside one of ``allowed``.
+
+    The path arrives as a CLI argument (or ``$GITHUB_OUTPUT``) and is therefore
+    untrusted. A traversal value (e.g. ``../../etc/passwd``) would otherwise let
+    a faulty or hostile invocation read or overwrite files outside the sanctioned
+    roots. Resolving and asserting containment closes that path-injection vector.
+
+    Raises:
+        SystemExit: If the resolved path escapes every allowed root.
+    """
+    candidate = Path(raw).resolve()
+    for base in allowed:
+        resolved_base = base.resolve()
+        if candidate == resolved_base or resolved_base in candidate.parents:
+            return candidate
+    print(f"ERROR: path escapes allowed roots: {raw}", file=sys.stderr)
+    raise SystemExit(1)
+
+
 def _blocking_severities(scanner_cfg: dict[str, str]) -> list[str]:
     """Return severities whose action is ``block``, lowest-first."""
-    blocking = [
+    return [
         sev
         for sev in _SEVERITY_ORDER
         if str(scanner_cfg.get(sev, "")).lower() == _BLOCK
     ]
-    return blocking
 
 
 def _snyk_threshold(snyk_cfg: dict[str, str]) -> str:
@@ -87,6 +134,38 @@ def _parse_expiry(value: object) -> date | None:
         return None
 
 
+def _exception_targets(
+    entry: object,
+    image_id: str,
+    today: date,
+) -> tuple[str, list[str], str | None]:
+    """Classify one exception entry for ``image_id``.
+
+    Returns ``(cve, targets, skip_msg)`` where ``targets`` is the subset of
+    ``{"trivy", "snyk"}`` the exception applies to and ``skip_msg`` is set when
+    the entry is dropped (wrong image, blank CVE, expired/invalid date, or an
+    unknown scanner). Fail-safe: a dropped exception suppresses nothing.
+    """
+    if not isinstance(entry, dict) or entry.get("image_id") != image_id:
+        return "", [], None
+    cve = str(entry.get("cve_id", "")).strip()
+    if not cve:
+        return "", [], None
+    if not _CVE_RE.match(cve):
+        # Reject anything that is not a bare vuln id before it can reach the
+        # .trivyignore write. Fail-safe: a malformed id suppresses nothing.
+        return cve, [], f"{cve} (malformed cve_id)"
+    expiry = _parse_expiry(entry.get("expires"))
+    if expiry is None or expiry < today:
+        reason = "invalid expires" if expiry is None else "expired"
+        return cve, [], f"{cve} ({reason})"
+    scanner = str(entry.get("scanner", "")).lower()
+    if scanner not in _VALID_SCANNERS:
+        return cve, [], f"{cve} (invalid scanner '{scanner}')"
+    targets = [s for s in ("trivy", "snyk") if scanner in (s, "both")]
+    return cve, targets, None
+
+
 def _active_exceptions(
     exceptions: list[dict[str, object]],
     image_id: str,
@@ -102,45 +181,101 @@ def _active_exceptions(
     snyk_cves: list[str] = []
     skipped: list[str] = []
     for entry in exceptions:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("image_id") != image_id:
-            continue
-        cve = str(entry.get("cve_id", "")).strip()
-        if not cve:
-            continue
-        expiry = _parse_expiry(entry.get("expires"))
-        if expiry is None or expiry < today:
-            reason = "invalid expires" if expiry is None else "expired"
-            skipped.append(f"{cve} ({reason})")
-            continue
-        scanner = str(entry.get("scanner", "")).lower()
-        if scanner not in _VALID_SCANNERS:
-            skipped.append(f"{cve} (invalid scanner '{scanner}')")
-            continue
-        if scanner in ("trivy", "both"):
+        cve, targets, skip_msg = _exception_targets(entry, image_id, today)
+        if skip_msg:
+            skipped.append(skip_msg)
+        if "trivy" in targets:
             trivy_cves.append(cve)
-        if scanner in ("snyk", "both"):
+        if "snyk" in targets:
             snyk_cves.append(cve)
     return trivy_cves, snyk_cves, skipped
 
 
-def _write_trivyignore(path: Path, cves: list[str], image_id: str) -> None:
-    """Write a .trivyignore file listing one approved CVE per line."""
+def _render_trivyignore(cves: list[str], image_id: str) -> str:
+    """Build the .trivyignore body, one approved CVE per line.
+
+    Pure string construction: the caller (``main``) performs the write next to
+    the path guard, and every ``cve`` here has already passed ``_CVE_RE``.
+    """
     lines = [
         "# Generated by scripts/load_scanner_policy.py from catalog/policies.yaml.",
         f"# Active, non-expired exceptions for image: {image_id}.",
         "# Do not edit by hand; edit catalog/policies.yaml instead.",
     ]
     lines.extend(cves)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return "\n".join(lines) + "\n"
 
 
-def _emit_outputs(output_path: Path, outputs: dict[str, str]) -> None:
-    """Append key=value output lines for a later workflow step to read."""
-    with output_path.open("a", encoding="utf-8") as fh:
-        for key, value in outputs.items():
-            fh.write(f"{key}={value}\n")
+def _render_outputs(outputs: dict[str, str]) -> str:
+    """Build the key=value block a later workflow step reads from $GITHUB_OUTPUT."""
+    return "".join(f"{key}={value}\n" for key, value in outputs.items())
+
+
+def _parse_policy(text: str) -> dict:
+    """Parse and structurally validate the policy YAML text.
+
+    Kept free of file I/O so the read sink stays co-located with the path guard
+    in ``main`` (the value reaching ``open`` is the validated path, not a raw
+    argument). Raises ``_PolicyError`` on invalid YAML, a non-mapping document,
+    or a missing ``scanner_policy`` mapping.
+    """
+    try:
+        policy = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise _PolicyError(f"policy file is not valid YAML: {exc}") from exc
+    if not isinstance(policy, dict):
+        raise _PolicyError("policy file is not a YAML mapping")
+    if not isinstance(policy.get("scanner_policy"), dict):
+        raise _PolicyError("policy file is missing a 'scanner_policy' mapping")
+    return policy
+
+
+def _resolve_today(raw: str | None) -> date:
+    """Return the reference date, honoring a ``--today`` test override.
+
+    Raises:
+        _PolicyError: If an override is given but is not an ISO-8601 date.
+    """
+    if not raw:
+        return datetime.now(timezone.utc).date()
+    parsed = _parse_expiry(raw)
+    if parsed is None:
+        raise _PolicyError(f"invalid --today value: {raw}")
+    return parsed
+
+
+def _build_outputs(
+    scanner_policy: dict,
+    trivy_cves: list[str],
+    snyk_cves: list[str],
+    trivyignore_path: Path,
+) -> dict[str, str]:
+    """Assemble the key=value pairs each downstream scanner step consumes."""
+    snyk_cfg = scanner_policy.get("snyk") or {}
+    trivy_cfg = scanner_policy.get("trivy") or {}
+    cosign_cfg = scanner_policy.get("upstream_cosign") or {}
+    identity = str(cosign_cfg.get("expected_identity_regexp", ".*"))
+    issuer = str(cosign_cfg.get("expected_issuer_regexp", ".*"))
+    return {
+        "snyk_threshold": _snyk_threshold(snyk_cfg),
+        "trivy_severities": _trivy_severities(trivy_cfg),
+        "trivyignore_file": str(trivyignore_path),
+        "trivy_exception_count": str(len(trivy_cves)),
+        "snyk_exception_cves": ",".join(snyk_cves),
+        "cosign_required": "true" if cosign_cfg.get("required") else "false",
+        "cosign_identity_regexp": identity,
+        "cosign_issuer_regexp": issuer,
+        "cosign_identity_pinned": "false" if identity == ".*" else "true",
+    }
+
+
+def _print_trace(image_id: str, outputs: dict[str, str], skipped: list[str]) -> None:
+    """Emit a human-readable trace to the job log (stdout, not an output channel)."""
+    print(f"Scanner policy for {image_id}:")
+    for key, value in outputs.items():
+        print(f"  {key}={value}")
+    if skipped:
+        print(f"  skipped exceptions (fail-safe, still blocking): {skipped}")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -169,70 +304,44 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+    allowed = _allowed_roots()
 
-    policy_path = Path(args.policy_file)
-    if not policy_path.is_file():
-        return _fail(f"policy file not found: {policy_path}")
+    image_id = args.image_id
+    if not _IMAGE_ID_RE.match(image_id):
+        return _fail(f"invalid image id: {image_id}")
 
     try:
-        with policy_path.open(encoding="utf-8") as fh:
-            policy = yaml.safe_load(fh)
-    except yaml.YAMLError as exc:
-        return _fail(f"policy file is not valid YAML: {exc}")
-
-    if not isinstance(policy, dict):
-        return _fail("policy file is not a YAML mapping")
-
-    scanner_policy = policy.get("scanner_policy")
-    if not isinstance(scanner_policy, dict):
-        return _fail("policy file is missing a 'scanner_policy' mapping")
-
-    snyk_cfg = scanner_policy.get("snyk") or {}
-    trivy_cfg = scanner_policy.get("trivy") or {}
-    cosign_cfg = scanner_policy.get("upstream_cosign") or {}
-
-    if args.today:
-        today = _parse_expiry(args.today)
-        if today is None:
-            return _fail(f"invalid --today value: {args.today}")
-    else:
-        today = datetime.now(timezone.utc).date()
+        policy_path = _resolve_within(args.policy_file, allowed)
+        if not policy_path.is_file():
+            return _fail(f"policy file not found: {policy_path}")
+        # Every filesystem access happens here in main, next to its path guard,
+        # so the taint analysis sees a validated path reaching each sink. The
+        # written content is also sanitized at source (_IMAGE_ID_RE, _CVE_RE).
+        policy = _parse_policy(policy_path.read_text(encoding="utf-8"))
+        today = _resolve_today(args.today)
+    except _PolicyError as exc:
+        return _fail(str(exc))
 
     exceptions = policy.get("exceptions") or []
     if not isinstance(exceptions, list):
         return _fail("'exceptions' must be a list")
 
-    trivy_cves, snyk_cves, skipped = _active_exceptions(
-        exceptions, args.image_id, today
+    trivy_cves, snyk_cves, skipped = _active_exceptions(exceptions, image_id, today)
+
+    trivyignore_path = _resolve_within(args.trivyignore_out, allowed)
+    trivyignore_path.write_text(
+        _render_trivyignore(trivy_cves, image_id), encoding="utf-8"
     )
 
-    trivyignore_path = Path(args.trivyignore_out)
-    _write_trivyignore(trivyignore_path, trivy_cves, args.image_id)
-
-    identity = str(cosign_cfg.get("expected_identity_regexp", ".*"))
-    issuer = str(cosign_cfg.get("expected_issuer_regexp", ".*"))
-
-    outputs = {
-        "snyk_threshold": _snyk_threshold(snyk_cfg),
-        "trivy_severities": _trivy_severities(trivy_cfg),
-        "trivyignore_file": str(trivyignore_path),
-        "trivy_exception_count": str(len(trivy_cves)),
-        "snyk_exception_cves": ",".join(snyk_cves),
-        "cosign_required": "true" if cosign_cfg.get("required") else "false",
-        "cosign_identity_regexp": identity,
-        "cosign_issuer_regexp": issuer,
-        "cosign_identity_pinned": "false" if identity == ".*" else "true",
-    }
-
-    # Human-readable trace in the job log (stdout, not an output channel).
-    print(f"Scanner policy for {args.image_id}:")
-    for key, value in outputs.items():
-        print(f"  {key}={value}")
-    if skipped:
-        print(f"  skipped exceptions (fail-safe, still blocking): {skipped}")
+    outputs = _build_outputs(
+        policy["scanner_policy"], trivy_cves, snyk_cves, trivyignore_path
+    )
+    _print_trace(image_id, outputs, skipped)
 
     if args.github_output:
-        _emit_outputs(Path(args.github_output), outputs)
+        output_path = _resolve_within(args.github_output, allowed)
+        with output_path.open("a", encoding="utf-8") as fh:
+            fh.write(_render_outputs(outputs))
 
     return 0
 
