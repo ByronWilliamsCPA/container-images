@@ -78,6 +78,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -123,22 +125,21 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
-      - name: Install crane
+      - name: Install crane (verify checksum before extraction)
         run: |
           curl -sL \
             "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
-            -o crane.tar.gz
-          tar xz -C /usr/local/bin crane < crane.tar.gz
-          rm crane.tar.gz
-          crane version
-
-      - name: Verify crane checksum
-        run: |
+            -o go-containerregistry_Linux_x86_64.tar.gz
           curl -sL \
             "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
             -o checksums.txt
           grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
+          tar xz -C /usr/local/bin crane < go-containerregistry_Linux_x86_64.tar.gz
+          rm go-containerregistry_Linux_x86_64.tar.gz checksums.txt
+          crane version
 
       - name: Mask registry credentials
         run: |
@@ -292,22 +293,21 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
-      - name: Install crane
+      - name: Install crane (verify checksum before extraction)
         run: |
           curl -sL \
             "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
-            -o crane.tar.gz
-          tar xz -C /usr/local/bin crane < crane.tar.gz
-          rm crane.tar.gz
-          crane version
-
-      - name: Verify crane checksum
-        run: |
+            -o go-containerregistry_Linux_x86_64.tar.gz
           curl -sL \
             "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
             -o checksums.txt
           grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
+          tar xz -C /usr/local/bin crane < go-containerregistry_Linux_x86_64.tar.gz
+          rm go-containerregistry_Linux_x86_64.tar.gz checksums.txt
+          crane version
 
       - name: Mask GitHub token
         run: echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
@@ -457,12 +457,12 @@ jobs:
           DISTROLESS_RESULT: ${{ needs.mirror-distroless.result }}
         run: |
           FAILED=0
-          if [ "${DHI_RESULT}" = "failure" ]; then
-            echo "::error::Some DHI image mirrors failed. Check job logs for details."
+          if [ "${DHI_RESULT}" != "success" ]; then
+            echo "::error::DHI mirror job did not succeed (result: ${DHI_RESULT}). Check job logs for details."
             FAILED=1
           fi
-          if [ "${DISTROLESS_RESULT}" = "failure" ]; then
-            echo "::error::Some Distroless image mirrors failed. Check job logs for details."
+          if [ "${DISTROLESS_RESULT}" != "success" ]; then
+            echo "::error::Distroless mirror job did not succeed (result: ${DISTROLESS_RESULT}). Check job logs for details."
             FAILED=1
           fi
           if [ "${FAILED}" = "1" ]; then
