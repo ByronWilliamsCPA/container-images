@@ -35,6 +35,7 @@ path = [
     ".pre-commit-config.yaml",
     ".secrets.baseline",
     "pyproject.toml",
+    "renovate.json",
 ]
 SPDX-License-Identifier = "MIT"
 SPDX-FileCopyrightText = "2025 Byron Williams"
