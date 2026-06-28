@@ -132,13 +132,13 @@ jobs:
         run: |
           curl -sL \
             "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
-            -o crane.tar.gz
+            -o go-containerregistry_Linux_x86_64.tar.gz
           curl -sL \
             "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
             -o checksums.txt
           grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
-          tar xz -C /usr/local/bin crane < crane.tar.gz
-          rm crane.tar.gz checksums.txt
+          tar xz -C /usr/local/bin crane < go-containerregistry_Linux_x86_64.tar.gz
+          rm go-containerregistry_Linux_x86_64.tar.gz checksums.txt
           crane version
 
       - name: Mask registry credentials
@@ -300,13 +300,13 @@ jobs:
         run: |
           curl -sL \
             "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
-            -o crane.tar.gz
+            -o go-containerregistry_Linux_x86_64.tar.gz
           curl -sL \
             "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
             -o checksums.txt
           grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
-          tar xz -C /usr/local/bin crane < crane.tar.gz
-          rm crane.tar.gz checksums.txt
+          tar xz -C /usr/local/bin crane < go-containerregistry_Linux_x86_64.tar.gz
+          rm go-containerregistry_Linux_x86_64.tar.gz checksums.txt
           crane version
 
       - name: Mask GitHub token
