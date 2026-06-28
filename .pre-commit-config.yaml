@@ -29,6 +29,6 @@ repos:
     hooks:
       - id: no-em-dash
         name: No em-dash characters
-        entry: bash -c 'if git diff --cached --name-only | xargs grep -l $'"'"'\xe2\x80\x94'"'"' 2>/dev/null; then echo "Em-dash character found. Use a comma, semicolon, or colon instead."; exit 1; fi'
+        entry: bash -c 'git diff --cached -U0 | grep -qP "^\+.*\xe2\x80\x94" && exit 1 || exit 0'
         language: system
         pass_filenames: false

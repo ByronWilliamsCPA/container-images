@@ -1,9 +1,6 @@
 version: 2
-updates:
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    labels:
-      - "dependencies"
+# Version updates disabled: Renovate (org-level config in .github/renovate.json)
+# handles all dependency and GitHub Actions updates, including SHA pinning and
+# auto-merge of minor/patch bumps. Dependabot security alerts remain active
+# via repo settings and feed into Renovate's vulnerabilityAlerts pipeline.
+updates: []
