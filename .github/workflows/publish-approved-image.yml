@@ -417,7 +417,7 @@ jobs:
       # the upload so a missing-file error does not mask the real Snyk failure.
       - name: Upload Snyk SARIF to Security tab
         if: always() && env.SNYK_TOKEN != '' && hashFiles('snyk-high.sarif') != ''
-        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           sarif_file: snyk-high.sarif
           category: snyk-${{ inputs.image_id }}
@@ -439,7 +439,7 @@ jobs:
 
       - name: Upload Trivy SARIF to Security tab
         if: always() && hashFiles('trivy-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           sarif_file: trivy-results.sarif
           category: trivy-${{ inputs.image_id }}
@@ -513,7 +513,7 @@ jobs:
 
       - name: Generate GitHub build provenance attestation
         if: github.ref == 'refs/heads/main'
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-name: ${{ env.ghcr_image }}
           subject-digest: ${{ env.target_digest }}
