@@ -67,12 +67,130 @@ def error(msg: str, image_id: str = "") -> str:
     return f"  ERROR: {prefix}{msg}"
 
 
-def validate(catalog: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-
+def _validate_top_level(catalog: dict[str, Any]) -> list[str]:
+    """Report any missing required top-level fields."""
     missing_top = REQUIRED_TOP_LEVEL - set(catalog.keys())
-    for field in sorted(missing_top):
-        errors.append(error(f"missing required top-level field: {field!r}"))
+    return [
+        error(f"missing required top-level field: {field!r}")
+        for field in sorted(missing_top)
+    ]
+
+
+def _validate_enum_field(
+    img: dict[str, Any], field: str, allowed: set[str], img_id: str
+) -> list[str]:
+    """Validate that an image's enum field holds an allowed value."""
+    value = img.get(field, "")
+    if value in allowed:
+        return []
+    return [
+        error(f"invalid {field} {value!r}; must be one of {sorted(allowed)}", img_id)
+    ]
+
+
+def _validate_image_modification(img: dict[str, Any], img_id: str) -> list[str]:
+    """Validate the image_modification mapping and its strategy value."""
+    mod = img.get("image_modification", {})
+    if not isinstance(mod, dict):
+        return [error("image_modification must be a mapping", img_id)]
+    strategy = mod.get("strategy", "")
+    if strategy in ALLOWED_STRATEGIES:
+        return []
+    return [
+        error(
+            f"invalid image_modification.strategy {strategy!r}; "
+            f"must be one of {sorted(ALLOWED_STRATEGIES)}",
+            img_id,
+        )
+    ]
+
+
+def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
+    """Validate the upstream mapping and its required fields."""
+    upstream = img.get("upstream", {})
+    if not isinstance(upstream, dict):
+        return [error("upstream must be a mapping", img_id)]
+    missing_u = REQUIRED_UPSTREAM_FIELDS - set(upstream.keys())
+    return [
+        error(f"upstream missing required field: {field!r}", img_id)
+        for field in sorted(missing_u)
+    ]
+
+
+def _validate_ghcr(
+    img: dict[str, Any], img_id: str, seen_ghcr_refs: set[str]
+) -> list[str]:
+    """Validate the ghcr mapping, required fields, and cross-image ref uniqueness."""
+    ghcr = img.get("ghcr", {})
+    if not isinstance(ghcr, dict):
+        return [error("ghcr must be a mapping", img_id)]
+    missing_g = REQUIRED_GHCR_FIELDS - set(ghcr.keys())
+    errors = [
+        error(f"ghcr missing required field: {field!r}", img_id)
+        for field in sorted(missing_g)
+    ]
+    ghcr_ref = f"ghcr.io/byronwilliamscpa/{ghcr.get('name', '')}:{ghcr.get('tag', '')}"
+    if ghcr_ref in seen_ghcr_refs:
+        errors.append(error(f"duplicate GHCR ref: {ghcr_ref}", img_id))
+    else:
+        seen_ghcr_refs.add(ghcr_ref)
+    return errors
+
+
+def _validate_platform_compatibility(img: dict[str, Any], img_id: str) -> list[str]:
+    """Validate the platform_compatibility mapping and its supported list."""
+    plat = img.get("platform_compatibility", {})
+    if not isinstance(plat, dict):
+        return [error("platform_compatibility must be a mapping", img_id)]
+    missing_p = REQUIRED_PLATFORM_FIELDS - set(plat.keys())
+    errors = [
+        error(f"platform_compatibility missing required field: {field!r}", img_id)
+        for field in sorted(missing_p)
+    ]
+    supported = plat.get("supported", [])
+    if not isinstance(supported, list) or not supported:
+        errors.append(
+            error("platform_compatibility.supported must be a non-empty list", img_id)
+        )
+    return errors
+
+
+def _validate_single_image(
+    img: dict[str, Any], i: int, seen_ids: set[str], seen_ghcr_refs: set[str]
+) -> list[str]:
+    """Validate one image entry, accumulating all errors for it."""
+    img_id = img.get("id", f"<index:{i}>")
+
+    errors = [
+        error(f"missing required field: {field!r}", img_id)
+        for field in sorted(REQUIRED_IMAGE_FIELDS - set(img.keys()))
+    ]
+
+    if str(img_id) in seen_ids:
+        errors.append(error("duplicate id", img_id))
+    else:
+        seen_ids.add(str(img_id))
+
+    errors.extend(
+        _validate_enum_field(img, "source_tier", ALLOWED_SOURCE_TIERS, img_id)
+    )
+    errors.extend(_validate_enum_field(img, "criticality", ALLOWED_CRITICALITY, img_id))
+    errors.extend(
+        _validate_enum_field(
+            img, "classification_status", ALLOWED_CLASSIFICATION_STATUS, img_id
+        )
+    )
+    errors.extend(_validate_enum_field(img, "disposition", ALLOWED_DISPOSITION, img_id))
+    errors.extend(_validate_image_modification(img, img_id))
+    errors.extend(_validate_upstream(img, img_id))
+    errors.extend(_validate_ghcr(img, img_id, seen_ghcr_refs))
+    errors.extend(_validate_platform_compatibility(img, img_id))
+    return errors
+
+
+def validate(catalog: dict[str, Any]) -> list[str]:
+    """Validate a parsed catalog mapping, returning all error messages."""
+    errors = _validate_top_level(catalog)
 
     if "images" not in catalog:
         return errors
@@ -89,117 +207,7 @@ def validate(catalog: dict[str, Any]) -> list[str]:
         if not isinstance(img, dict):
             errors.append(error(f"entry at index {i} is not a mapping"))
             continue
-
-        img_id = img.get("id", f"<index:{i}>")
-
-        missing = REQUIRED_IMAGE_FIELDS - set(img.keys())
-        for field in sorted(missing):
-            errors.append(error(f"missing required field: {field!r}", img_id))
-
-        if str(img_id) in seen_ids:
-            errors.append(error("duplicate id", img_id))
-        else:
-            seen_ids.add(str(img_id))
-
-        tier = img.get("source_tier", "")
-        if tier not in ALLOWED_SOURCE_TIERS:
-            errors.append(
-                error(
-                    f"invalid source_tier {tier!r}; "
-                    f"must be one of {sorted(ALLOWED_SOURCE_TIERS)}",
-                    img_id,
-                )
-            )
-
-        crit = img.get("criticality", "")
-        if crit not in ALLOWED_CRITICALITY:
-            errors.append(
-                error(
-                    f"invalid criticality {crit!r}; "
-                    f"must be one of {sorted(ALLOWED_CRITICALITY)}",
-                    img_id,
-                )
-            )
-
-        cls_status = img.get("classification_status", "")
-        if cls_status not in ALLOWED_CLASSIFICATION_STATUS:
-            errors.append(
-                error(
-                    f"invalid classification_status {cls_status!r}; "
-                    f"must be one of {sorted(ALLOWED_CLASSIFICATION_STATUS)}",
-                    img_id,
-                )
-            )
-
-        disposition = img.get("disposition", "")
-        if disposition not in ALLOWED_DISPOSITION:
-            errors.append(
-                error(
-                    f"invalid disposition {disposition!r}; "
-                    f"must be one of {sorted(ALLOWED_DISPOSITION)}",
-                    img_id,
-                )
-            )
-
-        mod = img.get("image_modification", {})
-        if isinstance(mod, dict):
-            strategy = mod.get("strategy", "")
-            if strategy not in ALLOWED_STRATEGIES:
-                errors.append(
-                    error(
-                        f"invalid image_modification.strategy {strategy!r}; "
-                        f"must be one of {sorted(ALLOWED_STRATEGIES)}",
-                        img_id,
-                    )
-                )
-        else:
-            errors.append(error("image_modification must be a mapping", img_id))
-
-        upstream = img.get("upstream", {})
-        if isinstance(upstream, dict):
-            missing_u = REQUIRED_UPSTREAM_FIELDS - set(upstream.keys())
-            for field in sorted(missing_u):
-                errors.append(
-                    error(f"upstream missing required field: {field!r}", img_id)
-                )
-        else:
-            errors.append(error("upstream must be a mapping", img_id))
-
-        ghcr = img.get("ghcr", {})
-        if isinstance(ghcr, dict):
-            missing_g = REQUIRED_GHCR_FIELDS - set(ghcr.keys())
-            for field in sorted(missing_g):
-                errors.append(error(f"ghcr missing required field: {field!r}", img_id))
-            ghcr_ref = (
-                f"ghcr.io/byronwilliamscpa/{ghcr.get('name', '')}:{ghcr.get('tag', '')}"
-            )
-            if ghcr_ref in seen_ghcr_refs:
-                errors.append(error(f"duplicate GHCR ref: {ghcr_ref}", img_id))
-            else:
-                seen_ghcr_refs.add(ghcr_ref)
-        else:
-            errors.append(error("ghcr must be a mapping", img_id))
-
-        plat = img.get("platform_compatibility", {})
-        if isinstance(plat, dict):
-            missing_p = REQUIRED_PLATFORM_FIELDS - set(plat.keys())
-            for field in sorted(missing_p):
-                errors.append(
-                    error(
-                        f"platform_compatibility missing required field: {field!r}",
-                        img_id,
-                    )
-                )
-            supported = plat.get("supported", [])
-            if not isinstance(supported, list) or not supported:
-                errors.append(
-                    error(
-                        "platform_compatibility.supported must be a non-empty list",
-                        img_id,
-                    )
-                )
-        else:
-            errors.append(error("platform_compatibility must be a mapping", img_id))
+        errors.extend(_validate_single_image(img, i, seen_ids, seen_ghcr_refs))
 
     return errors
 

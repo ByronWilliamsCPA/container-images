@@ -36,6 +36,9 @@ path = [
     ".secrets.baseline",
     "pyproject.toml",
     "renovate.json",
+    ".qlty/**",
+    ".snyk",
+    "uv.lock",
 ]
 SPDX-License-Identifier = "MIT"
 SPDX-FileCopyrightText = "2025 Byron Williams"
