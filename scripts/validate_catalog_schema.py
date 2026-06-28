@@ -19,7 +19,9 @@ from typing import Any
 try:
     import yaml
 except ImportError:
-    print("ERROR: PyYAML is required. Install with: pip install pyyaml", file=sys.stderr)
+    print(
+        "ERROR: PyYAML is required. Install with: pip install pyyaml", file=sys.stderr
+    )
     sys.exit(2)
 
 CATALOG_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("catalog/images.yaml")
@@ -40,7 +42,12 @@ REQUIRED_IMAGE_FIELDS = {
 ALLOWED_SOURCE_TIERS = {"primary", "distroless"}
 ALLOWED_CRITICALITY = {"critical", "high", "medium", "low"}
 ALLOWED_CLASSIFICATION_STATUS = {"classified", "pending"}
-ALLOWED_DISPOSITION = {"mirror_only", "custom_derivative", "decommission", "exception_only"}
+ALLOWED_DISPOSITION = {
+    "mirror_only",
+    "custom_derivative",
+    "decommission",
+    "exception_only",
+}
 ALLOWED_STRATEGIES = {
     "mirror_only",
     "replace_source",
@@ -96,42 +103,52 @@ def validate(catalog: dict[str, Any]) -> list[str]:
 
         tier = img.get("source_tier", "")
         if tier not in ALLOWED_SOURCE_TIERS:
-            errors.append(error(
-                f"invalid source_tier {tier!r}; must be one of {sorted(ALLOWED_SOURCE_TIERS)}",
-                img_id,
-            ))
+            errors.append(
+                error(
+                    f"invalid source_tier {tier!r}; must be one of {sorted(ALLOWED_SOURCE_TIERS)}",
+                    img_id,
+                )
+            )
 
         crit = img.get("criticality", "")
         if crit not in ALLOWED_CRITICALITY:
-            errors.append(error(
-                f"invalid criticality {crit!r}; must be one of {sorted(ALLOWED_CRITICALITY)}",
-                img_id,
-            ))
+            errors.append(
+                error(
+                    f"invalid criticality {crit!r}; must be one of {sorted(ALLOWED_CRITICALITY)}",
+                    img_id,
+                )
+            )
 
         cls_status = img.get("classification_status", "")
         if cls_status not in ALLOWED_CLASSIFICATION_STATUS:
-            errors.append(error(
-                f"invalid classification_status {cls_status!r}; "
-                f"must be one of {sorted(ALLOWED_CLASSIFICATION_STATUS)}",
-                img_id,
-            ))
+            errors.append(
+                error(
+                    f"invalid classification_status {cls_status!r}; "
+                    f"must be one of {sorted(ALLOWED_CLASSIFICATION_STATUS)}",
+                    img_id,
+                )
+            )
 
         disposition = img.get("disposition", "")
         if disposition not in ALLOWED_DISPOSITION:
-            errors.append(error(
-                f"invalid disposition {disposition!r}; must be one of {sorted(ALLOWED_DISPOSITION)}",
-                img_id,
-            ))
+            errors.append(
+                error(
+                    f"invalid disposition {disposition!r}; must be one of {sorted(ALLOWED_DISPOSITION)}",
+                    img_id,
+                )
+            )
 
         mod = img.get("image_modification", {})
         if isinstance(mod, dict):
             strategy = mod.get("strategy", "")
             if strategy not in ALLOWED_STRATEGIES:
-                errors.append(error(
-                    f"invalid image_modification.strategy {strategy!r}; "
-                    f"must be one of {sorted(ALLOWED_STRATEGIES)}",
-                    img_id,
-                ))
+                errors.append(
+                    error(
+                        f"invalid image_modification.strategy {strategy!r}; "
+                        f"must be one of {sorted(ALLOWED_STRATEGIES)}",
+                        img_id,
+                    )
+                )
         else:
             errors.append(error("image_modification must be a mapping", img_id))
 
@@ -139,7 +156,9 @@ def validate(catalog: dict[str, Any]) -> list[str]:
         if isinstance(upstream, dict):
             missing_u = REQUIRED_UPSTREAM_FIELDS - set(upstream.keys())
             for field in sorted(missing_u):
-                errors.append(error(f"upstream missing required field: {field!r}", img_id))
+                errors.append(
+                    error(f"upstream missing required field: {field!r}", img_id)
+                )
         else:
             errors.append(error("upstream must be a mapping", img_id))
 
@@ -148,7 +167,9 @@ def validate(catalog: dict[str, Any]) -> list[str]:
             missing_g = REQUIRED_GHCR_FIELDS - set(ghcr.keys())
             for field in sorted(missing_g):
                 errors.append(error(f"ghcr missing required field: {field!r}", img_id))
-            ghcr_ref = f"ghcr.io/byronwilliamscpa/{ghcr.get('name', '')}:{ghcr.get('tag', '')}"
+            ghcr_ref = (
+                f"ghcr.io/byronwilliamscpa/{ghcr.get('name', '')}:{ghcr.get('tag', '')}"
+            )
             if ghcr_ref in seen_ghcr_refs:
                 errors.append(error(f"duplicate GHCR ref: {ghcr_ref}", img_id))
             else:
@@ -160,12 +181,20 @@ def validate(catalog: dict[str, Any]) -> list[str]:
         if isinstance(plat, dict):
             missing_p = REQUIRED_PLATFORM_FIELDS - set(plat.keys())
             for field in sorted(missing_p):
-                errors.append(error(
-                    f"platform_compatibility missing required field: {field!r}", img_id
-                ))
+                errors.append(
+                    error(
+                        f"platform_compatibility missing required field: {field!r}",
+                        img_id,
+                    )
+                )
             supported = plat.get("supported", [])
             if not isinstance(supported, list) or not supported:
-                errors.append(error("platform_compatibility.supported must be a non-empty list", img_id))
+                errors.append(
+                    error(
+                        "platform_compatibility.supported must be a non-empty list",
+                        img_id,
+                    )
+                )
         else:
             errors.append(error("platform_compatibility must be a mapping", img_id))
 
@@ -185,14 +214,19 @@ def main() -> None:
         sys.exit(2)
 
     if not isinstance(catalog, dict):
-        print(f"ERROR: {CATALOG_PATH} must be a YAML mapping at the top level", file=sys.stderr)
+        print(
+            f"ERROR: {CATALOG_PATH} must be a YAML mapping at the top level",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     errors = validate(catalog)
     image_count = len(catalog.get("images", []))
 
     if errors:
-        print(f"FAIL: {len(errors)} validation error(s) in {CATALOG_PATH} ({image_count} images checked):")
+        print(
+            f"FAIL: {len(errors)} validation error(s) in {CATALOG_PATH} ({image_count} images checked):"
+        )
         for err in errors:
             print(err)
         sys.exit(1)

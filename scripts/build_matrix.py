@@ -55,7 +55,9 @@ def main() -> None:
     images = catalog.get("images", [])
 
     dhi = [build_include(img) for img in images if img.get("source_tier") == "primary"]
-    distroless = [build_include(img) for img in images if img.get("source_tier") == "distroless"]
+    distroless = [
+        build_include(img) for img in images if img.get("source_tier") == "distroless"
+    ]
 
     dhi_matrix = json.dumps({"include": dhi}, separators=(",", ":"))
     distroless_matrix = json.dumps({"include": distroless}, separators=(",", ":"))

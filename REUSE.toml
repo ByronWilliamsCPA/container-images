@@ -30,6 +30,7 @@ SPDX-FileCopyrightText = "2025 Byron Williams"
 path = [
     ".github/**",
     ".gitignore",
+    ".yamllint",
     ".vscode/**",
 ]
 SPDX-License-Identifier = "MIT"

@@ -47,10 +47,26 @@ jobs:
         run: pip install ruff --quiet
 
       - name: Ruff check
-        run: ruff check scripts/ tests/
+        run: |
+          PY_DIRS=""
+          [ -d scripts ] && PY_DIRS="$PY_DIRS scripts/"
+          [ -d tests ] && PY_DIRS="$PY_DIRS tests/"
+          if [ -n "$PY_DIRS" ]; then
+            ruff check $PY_DIRS
+          else
+            echo "No Python source directories found, skipping"
+          fi
 
       - name: Ruff format check
-        run: ruff format --check scripts/ tests/
+        run: |
+          PY_DIRS=""
+          [ -d scripts ] && PY_DIRS="$PY_DIRS scripts/"
+          [ -d tests ] && PY_DIRS="$PY_DIRS tests/"
+          if [ -n "$PY_DIRS" ]; then
+            ruff format --check $PY_DIRS
+          else
+            echo "No Python source directories found, skipping"
+          fi
 
   # ---------------------------------------------------------------------------
   # Run pytest test suite
@@ -79,10 +95,15 @@ jobs:
         run: pip install pyyaml pytest pip-audit --quiet
 
       - name: Run tests
-        run: python3 -m pytest tests/ -v --tb=short
+        run: |
+          if [ -d tests ]; then
+            python3 -m pytest tests/ -v --tb=short
+          else
+            echo "No tests directory found, skipping"
+          fi
 
-      - name: Audit test dependencies for known vulnerabilities
-        run: pip-audit --requirement <(pip freeze) --ignore-vuln PYSEC-2022-42969
+      - name: Audit installed dependencies for known vulnerabilities
+        run: pip-audit
         continue-on-error: true
 
   # ---------------------------------------------------------------------------

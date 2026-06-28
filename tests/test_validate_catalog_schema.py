@@ -34,7 +34,10 @@ def minimal_image(**overrides) -> dict:
         "image_modification": {"strategy": "mirror_only"},
         "upstream": {"registry": "dhi.io", "name": "test", "tag": "1-debian13"},
         "ghcr": {"name": "dhi-test", "tag": "1-debian13"},
-        "platform_compatibility": {"default": "linux/amd64", "supported": ["linux/amd64"]},
+        "platform_compatibility": {
+            "default": "linux/amd64",
+            "supported": ["linux/amd64"],
+        },
     }
     base.update(overrides)
     return base
@@ -92,11 +95,21 @@ class TestMissingTopLevel:
 
 
 class TestMissingImageFields:
-    @pytest.mark.parametrize("field", [
-        "id", "display_name", "source_tier", "criticality",
-        "classification_status", "disposition", "image_modification",
-        "upstream", "ghcr", "platform_compatibility",
-    ])
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "id",
+            "display_name",
+            "source_tier",
+            "criticality",
+            "classification_status",
+            "disposition",
+            "image_modification",
+            "upstream",
+            "ghcr",
+            "platform_compatibility",
+        ],
+    )
     def test_missing_field(self, field: str):
         img = minimal_image()
         del img[field]

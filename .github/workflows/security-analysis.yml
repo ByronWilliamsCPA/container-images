@@ -50,7 +50,12 @@ jobs:
         run: pip install bandit --quiet
 
       - name: Run Bandit on scripts
-        run: bandit -r scripts/ -f txt
+        run: |
+          if [ -d scripts ]; then
+            bandit -r scripts/ -f txt
+          else
+            echo "No scripts directory found, skipping bandit"
+          fi
 
   # ---------------------------------------------------------------------------
   # YAML security: lint catalog YAML for structural issues
