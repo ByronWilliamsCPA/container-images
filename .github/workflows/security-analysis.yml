@@ -78,8 +78,11 @@ jobs:
       - name: Install yamllint
         run: pip install yamllint --quiet
 
-      - name: Lint catalog YAML files
-        run: yamllint catalog/ .github/workflows/
+      - name: Lint YAML files
+        run: |
+          YAML_DIRS=".github/workflows/"
+          [ -d catalog ] && YAML_DIRS="$YAML_DIRS catalog/"
+          yamllint $YAML_DIRS
 
   # ---------------------------------------------------------------------------
   # Aggregator: emits "Security Gate Validation" required by org ruleset
