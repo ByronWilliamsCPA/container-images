@@ -1,0 +1,108 @@
+# Security Analysis for container-images
+#
+# Runs inline security checks suited to this repo's content (Python scripts and
+# YAML catalog data rather than a Python package). The final job
+# "security-gate-validation" emits the check context "Security Gate Validation"
+# required by the org default-branch ruleset.
+name: Security Analysis
+
+"on":
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly scan on Mondays at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Script security: static analysis of Python scripts with Bandit
+  # ---------------------------------------------------------------------------
+  script-security:
+    name: Script Security (Bandit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Bandit
+        run: pip install bandit --quiet
+
+      - name: Run Bandit on scripts
+        run: bandit -r scripts/ -f txt
+
+  # ---------------------------------------------------------------------------
+  # YAML security: lint catalog YAML for structural issues
+  # ---------------------------------------------------------------------------
+  yaml-lint:
+    name: YAML Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install yamllint
+        run: pip install yamllint --quiet
+
+      - name: Lint catalog YAML files
+        run: yamllint catalog/ .github/workflows/
+
+  # ---------------------------------------------------------------------------
+  # Aggregator: emits "Security Gate Validation" required by org ruleset
+  # ---------------------------------------------------------------------------
+  security-gate-validation:
+    name: Security Gate Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [script-security, yaml-lint]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Check security scan results
+        env:
+          SCRIPT_RESULT: ${{ needs.script-security.result }}
+          YAML_RESULT: ${{ needs.yaml-lint.result }}
+        run: |
+          echo "Script security: $SCRIPT_RESULT"
+          echo "YAML lint:        $YAML_RESULT"
+
+          if [ "$SCRIPT_RESULT" != "success" ] || [ "$YAML_RESULT" != "success" ]; then
+            echo "::error::Security Gate Validation failed"
+            exit 1
+          fi
+          echo "Security Gate Validation passed"
