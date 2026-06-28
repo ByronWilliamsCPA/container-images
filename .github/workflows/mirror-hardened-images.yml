@@ -70,7 +70,7 @@ jobs:
       distroless_count: ${{ steps.build-matrix.outputs.distroless_count }}
 
     steps:
-      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
+      # egress-policy: block deferred pending allowed-endpoints verification (see #18)
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -117,7 +117,7 @@ jobs:
       matrix: ${{ fromJson(needs.prepare.outputs.dhi_matrix) }}
 
     steps:
-      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
+      # egress-policy: block deferred pending allowed-endpoints verification (see #18)
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -142,10 +142,14 @@ jobs:
           crane version
 
       - name: Mask registry credentials
+        env:
+          DHI_REGISTRY_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
+          DHI_REGISTRY_TOKEN: ${{ secrets.DHI_REGISTRY_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "::add-mask::${{ secrets.DHI_REGISTRY_USERNAME }}"
-          echo "::add-mask::${{ secrets.DHI_REGISTRY_TOKEN }}"
-          echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
+          echo "::add-mask::$DHI_REGISTRY_USERNAME"
+          echo "::add-mask::$DHI_REGISTRY_TOKEN"
+          echo "::add-mask::$GH_TOKEN"
 
       - name: Authenticate crane to registries
         env:
@@ -285,7 +289,7 @@ jobs:
       matrix: ${{ fromJson(needs.prepare.outputs.distroless_matrix) }}
 
     steps:
-      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
+      # egress-policy: block deferred pending allowed-endpoints verification (see #18)
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -310,7 +314,9 @@ jobs:
           crane version
 
       - name: Mask GitHub token
-        run: echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "::add-mask::$GH_TOKEN"
 
       - name: Authenticate crane to GHCR
         env:
@@ -425,7 +431,7 @@ jobs:
       contents: read
 
     steps:
-      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
+      # egress-policy: block deferred pending allowed-endpoints verification (see #18)
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
