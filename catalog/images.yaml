@@ -36,6 +36,32 @@ images:
   # Databases
   # ---------------------------------------------------------------------------
 
+  - id: dhi-postgres-17
+    display_name: "DHI PostgreSQL 17"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: postgres
+      # #ASSUME: DHI publishes postgres 17 under the same <major>-debian13 tag
+      # convention as 14/16; confirmed available via the defenseunicorns DHI
+      # mirror (ghcr.io/defenseunicorns-partnerships/dhi/postgres:17) currently
+      # consumed by paperless and prefect.
+      # #VERIFY: the mirror workflow resolves dhi.io/postgres:17-debian13; if the
+      # tag is absent the matrix job for this entry fails loudly (fail-fast off).
+      tag: "17-debian13"
+    ghcr:
+      name: dhi-postgres
+      tag: "17-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "PostgreSQL 17 base for paperless-ngx and prefect; replaces the third-party defenseunicorns DHI mirror."
+
   - id: dhi-postgres-16
     display_name: "DHI PostgreSQL 16"
     source_tier: primary
