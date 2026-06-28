@@ -96,7 +96,7 @@ def validate(catalog: dict[str, Any]) -> list[str]:
         for field in sorted(missing):
             errors.append(error(f"missing required field: {field!r}", img_id))
 
-        if img_id in seen_ids:
+        if str(img_id) in seen_ids:
             errors.append(error("duplicate id", img_id))
         else:
             seen_ids.add(str(img_id))
