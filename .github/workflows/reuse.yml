@@ -20,6 +20,7 @@ name: REUSE Compliance
       - "REUSE.toml"
       - "LICENSES/**"
       - ".github/workflows/reuse.yml"
+  merge_group:
 
 permissions: {}
 

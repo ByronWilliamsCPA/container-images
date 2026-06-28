@@ -9,6 +9,7 @@ name: PR Validation
   pull_request:
     branches:
       - main
+  merge_group:
 
 # Cancel superseded runs on the same PR; the required check result comes from
 # the newest commit anyway, so stale runs only burn minutes.
