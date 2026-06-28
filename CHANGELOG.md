@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Security
+
+- Move CI secrets out of `run:` script interpolation into step-level `env:` blocks
+  in the mirror workflow, so secret values are no longer expanded directly into
+  shell command lines.
+- Validate the `GITHUB_OUTPUT` path in `build_matrix.py` (absolute path with an
+  existing parent directory) before appending to it, falling back to stdout
+  otherwise, to prevent writes being redirected to an unexpected location.
+- Scope the Scorecard workflow's top-level permissions to `contents: read` instead
+  of `read-all`.
+
 ## [0.2.0] - 2026-06-27
 
 ### Changed
