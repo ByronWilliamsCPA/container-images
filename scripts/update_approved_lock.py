@@ -60,15 +60,28 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Upsert one promotion entry into the lock file and write it back.
+
+    Reads the lock file, replaces the entry whose ``id`` matches ``--image-id``
+    (or appends a new one), stamps ``metadata.last_updated``, and writes the
+    result atomically. Returns 0 on success, 1 on any argument or I/O error.
+    """
     args = _parse_args()
 
     lock_path = _resolve_lock_path(args.lock_file)
-    if not lock_path.exists():
-        print(f"ERROR: lock file not found: {lock_path}", file=sys.stderr)
+    if not lock_path.is_file():
+        print(
+            f"ERROR: lock file not found or not a file: {lock_path}",
+            file=sys.stderr,
+        )
         return 1
 
-    with lock_path.open() as fh:
-        data = yaml.safe_load(fh)
+    try:
+        with lock_path.open() as fh:
+            data = yaml.safe_load(fh)
+    except yaml.YAMLError as exc:
+        print(f"ERROR: lock file is not valid YAML: {exc}", file=sys.stderr)
+        return 1
 
     if not isinstance(data, dict):
         print("ERROR: lock file is not a YAML mapping", file=sys.stderr)
@@ -84,6 +97,9 @@ def main() -> int:
     }
 
     promoted: list[dict[str, str]] = data.get("promoted") or []
+    if not isinstance(promoted, list):
+        print("ERROR: 'promoted' is present but is not a list", file=sys.stderr)
+        return 1
     updated = False
     for i, existing in enumerate(promoted):
         if existing.get("id") == args.image_id:
@@ -99,10 +115,14 @@ def main() -> int:
     data["promoted"] = promoted
     data.setdefault("metadata", {})["last_updated"] = args.promoted_at
 
-    with lock_path.open("w") as fh:
+    # Write to a temp file then atomically replace, so a failed dump never
+    # truncates the canonical lock file (which the workflow would then commit).
+    tmp_path = lock_path.with_suffix(lock_path.suffix + ".tmp")
+    with tmp_path.open("w") as fh:
         yaml.dump(
             data, fh, default_flow_style=False, sort_keys=False, allow_unicode=True
         )
+    tmp_path.replace(lock_path)
 
     print(f"Lock file written: {lock_path} ({len(promoted)} entries)")
     return 0
