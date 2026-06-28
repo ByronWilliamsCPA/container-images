@@ -195,10 +195,14 @@ jobs:
           GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
           UPSTREAM_REGISTRY: ${{ inputs.upstream_registry }}
         run: |
+          # --password-stdin keeps the token out of the process argument list
+          # (visible in /proc and CI logs); matches the docker login step below.
           if [ "${UPSTREAM_REGISTRY}" = "dhi.io" ] && [ -n "${DHI_USER}" ] && [ -n "${DHI_PASS}" ]; then
-            crane auth login dhi.io --username "${DHI_USER}" --password "${DHI_PASS}"
+            printf '%s' "${DHI_PASS}" | \
+              crane auth login dhi.io --username "${DHI_USER}" --password-stdin
           fi
-          crane auth login ghcr.io --username "${GHCR_USER}" --password "${GHCR_PASS}"
+          printf '%s' "${GHCR_PASS}" | \
+            crane auth login ghcr.io --username "${GHCR_USER}" --password-stdin
 
       - name: Authenticate Docker to GHCR
         env:
