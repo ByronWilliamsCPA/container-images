@@ -1,0 +1,14 @@
+# Snyk (https://snyk.io) policy file
+# Documented suppressions. Each entry states why the finding is not exploitable
+# and carries an expiry so it is revisited.
+version: v1.5.0
+ignore:
+  python/PathTraversal:
+    - "scripts/build_matrix.py > pathlib.Path":
+        reason: >-
+          False positive. The only tainted input is GITHUB_OUTPUT, which is
+          provided by the GitHub Actions runner (not attacker-controlled). The
+          path is additionally validated in resolve_output_path() as an absolute
+          path whose parent directory already exists before any write; otherwise
+          the script falls back to stdout.
+        expires: 2027-01-01T00:00:00.000Z

@@ -44,6 +44,22 @@ def build_include(img: dict) -> dict:
     }
 
 
+def resolve_output_path(raw: str) -> Path | None:
+    """Return a validated GITHUB_OUTPUT path, or None to fall back to stdout.
+
+    GITHUB_OUTPUT is provided by the Actions runner, but we still validate it is
+    an absolute path whose parent directory already exists before opening it for
+    append. This prevents an unexpected or attacker-influenced value from
+    redirecting the write to an arbitrary location (path traversal).
+    """
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if not candidate.is_absolute() or not candidate.parent.is_dir():
+        return None
+    return candidate
+
+
 def main() -> None:
     if not CATALOG_PATH.exists():
         print(f"ERROR: {CATALOG_PATH} not found", file=sys.stderr)
@@ -62,18 +78,19 @@ def main() -> None:
     dhi_matrix = json.dumps({"include": dhi}, separators=(",", ":"))
     distroless_matrix = json.dumps({"include": distroless}, separators=(",", ":"))
 
-    github_output = os.environ.get("GITHUB_OUTPUT", "")
-    if github_output:
-        with open(github_output, "a") as fh:
-            fh.write(f"dhi_matrix={dhi_matrix}\n")
-            fh.write(f"distroless_matrix={distroless_matrix}\n")
-            fh.write(f"dhi_count={len(dhi)}\n")
-            fh.write(f"distroless_count={len(distroless)}\n")
+    lines = (
+        f"dhi_matrix={dhi_matrix}\n"
+        f"distroless_matrix={distroless_matrix}\n"
+        f"dhi_count={len(dhi)}\n"
+        f"distroless_count={len(distroless)}\n"
+    )
+
+    output_path = resolve_output_path(os.environ.get("GITHUB_OUTPUT", ""))
+    if output_path is not None:
+        with output_path.open("a") as fh:
+            fh.write(lines)
     else:
-        print(f"dhi_matrix={dhi_matrix}")
-        print(f"distroless_matrix={distroless_matrix}")
-        print(f"dhi_count={len(dhi)}")
-        print(f"distroless_count={len(distroless)}")
+        sys.stdout.write(lines)
 
 
 if __name__ == "__main__":
