@@ -8,7 +8,9 @@ metadata:
   last_updated: "2026-06-28"
 
 # Vulnerability scanner policy applied by publish-approved-image.yml (A2).
-# Each field maps to a specific action taken during promotion.
+# scripts/load_scanner_policy.py reads this file at promotion time and
+# translates it into the concrete scanner knobs: the Snyk severity floor, the
+# Trivy severity list, and the Cosign identity checks below.
 #
 # snyk / trivy action values:
 #   block   -- promotion fails; image is not published to GHCR
@@ -30,14 +32,29 @@ scanner_policy:
 
   # Upstream Cosign signature check (dhi.io or gcr.io source images).
   # Set required: true only after confirming the upstream registry uses Cosign.
+  #
+  # expected_identity_regexp / expected_issuer_regexp pin WHO must have signed
+  # the upstream image. The default ".*" accepts any Sigstore identity, which
+  # only proves a signature exists, not that the trusted publisher produced it;
+  # the workflow emits a warning whenever the identity is left unpinned.
+  # #ASSUME the upstream signer identity is unknown until confirmed per source.
+  # #VERIFY inspect an upstream signature with
+  #   `cosign verify --certificate-identity-regexp ... <ref>` and replace ".*"
+  #   with the publisher's Fulcio identity + OIDC issuer before relying on it.
   upstream_cosign:
     required: false
     advisory: true
+    expected_identity_regexp: ".*"
+    expected_issuer_regexp: ".*"
 
 # Exception framework.
 # Each entry grants a named exemption for a specific CVE on a specific image.
 # Exceptions require: justification, ticket reference, and an expiry date.
-# The A2 workflow reads this list and skips the blocked finding for that image.
+# load_scanner_policy.py reads this list and, for the image being promoted,
+# emits non-expired Trivy exceptions into a generated .trivyignore so Trivy
+# stops blocking on them. Snyk exceptions are surfaced as a warning (Snyk
+# suppresses by its own issue id, not by CVE, so they are not auto-applied).
+# Expired or undated entries are ignored (fail-safe: the finding still blocks).
 #
 # Schema:
 #   image_id:      str  -- matches catalog/images.yaml id field

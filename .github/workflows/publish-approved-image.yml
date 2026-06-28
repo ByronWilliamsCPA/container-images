@@ -6,10 +6,10 @@
 #
 # Pipeline stages (must all pass to promote):
 #   1. Resolve upstream digest (crane, TOCTOU-safe)
-#   2. Upstream Cosign check (advisory by default, required if input set)
-#   3. crane copy by digest to GHCR
-#   4. Snyk container scan (Critical/High block; Medium warn; Low record)
-#   5. Trivy container scan (Critical/High block, SARIF upload)
+#   2. Upstream Cosign check (identity/issuer + required flag from policies.yaml)
+#   3. crane copy by digest to GHCR (single platform; multi-arch index warns)
+#   4. Snyk container scan (thresholds + exceptions from catalog/policies.yaml)
+#   5. Trivy container scan (thresholds + .trivyignore from catalog/policies.yaml)
 #   6. Syft SBOM (CycloneDX JSON + SPDX JSON)
 #   7. Cosign keyless sign + CycloneDX SBOM attestation
 #   8. GitHub build provenance attestation
@@ -20,9 +20,9 @@
 #     promote-postgres:
 #       uses: ByronWilliamsCPA/container-images/.github/workflows/publish-approved-image.yml@main
 #       with:
-#         image_id: dhi-postgres
+#         image_id: dhi-postgres-16
 #         upstream_registry: dhi.io
-#         upstream_name: hardened/postgres
+#         upstream_name: postgres
 #         upstream_tag: "16-debian13"
 #         ghcr_name: dhi-postgres
 #         ghcr_tag: "16-debian13"
@@ -106,7 +106,13 @@ on:
         value: ${{ jobs.promote.outputs.target_digest }}
 
 env:
+  # #ASSUME the crane release asset name and the sha256 below stay valid for
+  # this pinned version; GitHub release assets are immutable once published.
+  # #VERIFY when bumping CRANE_VERSION, refresh CRANE_SHA256 from the release
+  #   checksums.txt: `curl -sL .../v<ver>/checksums.txt | grep Linux_x86_64`.
   CRANE_VERSION: "0.20.2"
+  # Published crane release checksum (not a secret); verified before extraction.
+  CRANE_SHA256: "c14340087103ba9dadf61d45acd20675490fd0ccbd56ac7901fc1b502137f44b"  # pragma: allowlist secret
 
 jobs:
   # ===========================================================================
@@ -150,21 +156,20 @@ jobs:
 
       # ---- crane install + verify ------------------------------------------
 
-      - name: Install crane
+      - name: Install and verify crane
         run: |
           CRANE_BASE="https://github.com/google/go-containerregistry/releases/download"
-          curl -sL "${CRANE_BASE}/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
-            -o crane.tar.gz
+          CRANE_ASSET="go-containerregistry_Linux_x86_64.tar.gz"
+          # --fail makes curl exit non-zero on an HTTP 4xx/5xx instead of
+          # silently writing the error body into crane.tar.gz.
+          curl --fail --show-error --silent --location \
+            "${CRANE_BASE}/v${CRANE_VERSION}/${CRANE_ASSET}" -o crane.tar.gz
+          # Verify against the sha256 pinned in this repo (an independent trust
+          # anchor) BEFORE extracting or executing the downloaded binary.
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum --check
           tar xz -C /usr/local/bin crane < crane.tar.gz
           rm crane.tar.gz
           crane version
-
-      - name: Verify crane checksum
-        run: |
-          curl -sL \
-            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
-            -o checksums.txt
-          grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
 
       # ---- cosign install ---------------------------------------------------
 
@@ -204,6 +209,10 @@ jobs:
             docker login ghcr.io --username "${GHCR_USER}" --password-stdin
 
       # ---- resolve upstream digest ------------------------------------------
+      # #ASSUME the upstream tag resolves to a stable digest between this step
+      # and the crane copy below; copying by the resolved digest pins the bytes.
+      # #VERIFY the post-copy digest assertion in "Copy image by digest" fails
+      #   the job if the GHCR digest differs from the one resolved here.
 
       - name: Resolve upstream digest
         id: resolve
@@ -225,6 +234,14 @@ jobs:
           SOURCE_DIGEST=$(crane digest "${SOURCE}" --platform "${PLATFORM}")
           echo "Source digest: ${SOURCE_DIGEST}"
 
+          # Validate the digest shape before persisting it to GITHUB_ENV; a
+          # malformed value (e.g. one containing a newline) could otherwise
+          # smuggle extra environment lines into later steps.
+          if ! printf '%s' "${SOURCE_DIGEST}" | grep -qE '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::Resolved digest is not a valid sha256: ${SOURCE_DIGEST}"
+            exit 1
+          fi
+
           echo "upstream_ref=${SOURCE}"        >> "${GITHUB_ENV}"
           echo "ghcr_ref=${GHCR_REF}"          >> "${GITHUB_ENV}"
           echo "ghcr_image=${GHCR_IMAGE}"       >> "${GITHUB_ENV}"
@@ -234,26 +251,65 @@ jobs:
           echo "ghcr_ref=${GHCR_REF}"          >> "${GITHUB_OUTPUT}"
           echo "source_digest=${SOURCE_DIGEST}" >> "${GITHUB_OUTPUT}"
 
-      # ---- upstream Cosign check (advisory by default) ----------------------
+      # ---- load scanner policy (catalog/policies.yaml is the source of truth) -
+
+      - name: Load scanner policy
+        id: policy
+        env:
+          IMAGE_ID: ${{ inputs.image_id }}
+        run: |
+          # pyyaml is a declared project dependency; pin the runtime install so
+          # an unexpected upstream release cannot enter a privileged job.
+          pip install --quiet "pyyaml==6.0.3"
+          python3 scripts/load_scanner_policy.py \
+            --policy-file catalog/policies.yaml \
+            --image-id "${IMAGE_ID}" \
+            --trivyignore-out .trivyignore
+
+      # ---- upstream Cosign check (policy-driven identity + required flag) ----
 
       - name: Check upstream Cosign signature
         env:
-          REQUIRE: ${{ inputs.require_upstream_signature }}
+          REQUIRE_INPUT: ${{ inputs.require_upstream_signature }}
+          REQUIRE_POLICY: ${{ steps.policy.outputs.cosign_required }}
+          IDENTITY: ${{ steps.policy.outputs.cosign_identity_regexp }}
+          ISSUER: ${{ steps.policy.outputs.cosign_issuer_regexp }}
+          IDENTITY_PINNED: ${{ steps.policy.outputs.cosign_identity_pinned }}
         run: |
           SIGNED_REF="${upstream_ref}@${source_digest}"
+          REQUIRE="false"
+          if [ "${REQUIRE_INPUT}" = "true" ] || [ "${REQUIRE_POLICY}" = "true" ]; then
+            REQUIRE="true"
+          fi
+
+          # An unpinned identity verifies only that *a* signature exists, not
+          # that the trusted publisher produced it. Warn loudly so a "required"
+          # check is not mistaken for real identity assurance.
+          if [ "${IDENTITY_PINNED}" != "true" ]; then
+            echo "::warning::Upstream Cosign identity is not pinned (regexp '.*'):" \
+              "this checks signature presence only, NOT the signer. Set" \
+              "expected_identity_regexp/expected_issuer_regexp in catalog/policies.yaml."
+          fi
+
+          # Capture stderr so a failed verification (tampered signature, network
+          # error) is reported distinctly from a genuinely absent signature.
+          COSIGN_ERR="$(mktemp)"
           if cosign verify \
-              --certificate-identity-regexp=".*" \
-              --certificate-oidc-issuer-regexp=".*" \
-              "${SIGNED_REF}" 2>/dev/null; then
+              --certificate-identity-regexp="${IDENTITY}" \
+              --certificate-oidc-issuer-regexp="${ISSUER}" \
+              "${SIGNED_REF}" 2>"${COSIGN_ERR}"; then
             echo "::notice::Upstream Cosign signature verified: ${SIGNED_REF}"
           else
-            MSG="No Cosign signature found on upstream image: ${SIGNED_REF}"
+            DETAIL="$(head -c 300 "${COSIGN_ERR}" | tr '\n' ' ')"
+            MSG="Upstream Cosign verification failed for ${SIGNED_REF}: ${DETAIL}"
             if [ "${REQUIRE}" = "true" ]; then
-              echo "::error::${MSG} (require_upstream_signature=true)"
+              echo "::error::${MSG} (signature required)"
+              rm -f "${COSIGN_ERR}"
               exit 1
             fi
             echo "::warning::${MSG} (advisory; promotion continues)"
           fi
+          rm -f "${COSIGN_ERR}"
 
       # ---- crane copy with digest assertion ---------------------------------
 
@@ -262,6 +318,16 @@ jobs:
         env:
           PLATFORM: ${{ inputs.platform }}
         run: |
+          # source_digest is the platform-specific child digest, so this copies
+          # a single architecture. Warn if the upstream tag is a multi-arch
+          # index, because the other architectures are not mirrored.
+          if crane manifest "${upstream_ref}" 2>/dev/null \
+              | jq -e '.manifests' >/dev/null 2>&1; then
+            echo "::warning::${upstream_ref} is a multi-arch image index;" \
+              "only platform ${PLATFORM} is promoted to GHCR." \
+              "Other architectures are not mirrored."
+          fi
+
           echo "Copying ${upstream_ref}@${source_digest} -> ${ghcr_ref}..."
           crane copy "${upstream_ref}@${source_digest}" "${ghcr_ref}"
 
@@ -295,7 +361,9 @@ jobs:
           SNYK_TOKEN: ${{ env.SNYK_TOKEN }}
         with:
           image: ${{ env.ghcr_ref }}@${{ env.target_digest }}
-          args: --severity-threshold=high --sarif-file-output=snyk-high.sarif
+          args: >-
+            --severity-threshold=${{ steps.policy.outputs.snyk_threshold }}
+            --sarif-file-output=snyk-high.sarif
 
       - name: Snyk medium warning
         if: env.SNYK_TOKEN != ''
@@ -303,23 +371,48 @@ jobs:
           SNYK_TOKEN: ${{ env.SNYK_TOKEN }}
           TARGET_WITH_DIGEST: ${{ env.ghcr_ref }}@${{ env.target_digest }}
           IMAGE_ID: ${{ inputs.image_id }}
+          SNYK_EXCEPTIONS: ${{ steps.policy.outputs.snyk_exception_cves }}
         run: |
-          MEDIUM_COUNT=$(
-            snyk container test "${TARGET_WITH_DIGEST}" \
-              --severity-threshold=medium --json 2>/dev/null \
-            | jq '[.vulnerabilities[]? | select(.severity == "medium")] | length' \
-            2>/dev/null || echo "0"
-          )
-          if [ "${MEDIUM_COUNT}" -gt "0" ]; then
-            MSG="Snyk: ${MEDIUM_COUNT} medium-severity issue(s) in ${IMAGE_ID}"
-            echo "::warning::${MSG} (policy: warn, not blocking)."
+          # Distinguish "scan found zero medium issues" from "scan did not run".
+          # A failed scan must NOT be reported as a clean 0; that would let a
+          # scanner outage masquerade as a clean image in a security gate.
+          set +e
+          SNYK_JSON="$(snyk container test "${TARGET_WITH_DIGEST}" \
+            --severity-threshold=medium --json 2>snyk-medium-err.log)"
+          SNYK_RC=$?
+          set -e
+          # snyk rc: 0 = none at/above threshold, 1 = found, 2 = error,
+          # 3 = no supported target.
+          if [ "${SNYK_RC}" -ge 2 ]; then
+            DETAIL="$(tail -n1 snyk-medium-err.log 2>/dev/null)"
+            echo "::warning::Snyk medium scan did not complete (rc=${SNYK_RC}) for" \
+              "${IMAGE_ID}: ${DETAIL}. Treated as UNKNOWN, not zero."
           else
-            echo "Snyk medium check: 0 medium-severity issues."
+            MEDIUM_COUNT="$(printf '%s' "${SNYK_JSON}" \
+              | jq '[.vulnerabilities[]? | select(.severity == "medium")] | length' \
+              2>/dev/null)"
+            if printf '%s' "${MEDIUM_COUNT}" | grep -qE '^[0-9]+$' \
+                && [ "${MEDIUM_COUNT}" -gt 0 ]; then
+              echo "::warning::Snyk: ${MEDIUM_COUNT} medium-severity issue(s) in" \
+                "${IMAGE_ID} (policy: warn, not blocking)."
+            elif printf '%s' "${MEDIUM_COUNT}" | grep -qE '^[0-9]+$'; then
+              echo "Snyk medium check: 0 medium-severity issues."
+            else
+              echo "::warning::Snyk medium count unparseable for ${IMAGE_ID};" \
+                "treated as UNKNOWN, not zero."
+            fi
+          fi
+          if [ -n "${SNYK_EXCEPTIONS}" ]; then
+            echo "::warning::Snyk CVE exceptions for ${IMAGE_ID} (${SNYK_EXCEPTIONS})" \
+              "are NOT auto-suppressed; Snyk ignores by issue id, not CVE." \
+              "Verify them manually."
           fi
         continue-on-error: true
 
+      # hashFiles guard: if the Snyk gate failed before writing its SARIF, skip
+      # the upload so a missing-file error does not mask the real Snyk failure.
       - name: Upload Snyk SARIF to Security tab
-        if: always() && env.SNYK_TOKEN != ''
+        if: always() && env.SNYK_TOKEN != '' && hashFiles('snyk-high.sarif') != ''
         uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
         with:
           sarif_file: snyk-high.sarif
@@ -337,16 +430,21 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           exit-code: '1'
-          severity: 'CRITICAL,HIGH'
+          severity: ${{ steps.policy.outputs.trivy_severities }}
+          trivyignores: ${{ steps.policy.outputs.trivyignore_file }}
 
       - name: Upload Trivy SARIF to Security tab
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
         with:
           sarif_file: trivy-results.sarif
           category: trivy-${{ inputs.image_id }}
 
       # ---- SBOM generation --------------------------------------------------
+      # #ASSUME the anchore/syft digest below matches tag v1.44.0; a digest pin
+      # prevents a re-tagged image from running with docker-socket access.
+      # #VERIFY when bumping the syft version, refresh the digest with
+      #   `crane digest anchore/syft:v<ver>` and update both run steps.
 
       - name: Generate CycloneDX SBOM (Syft)
         id: sbom-cdx
@@ -356,7 +454,7 @@ jobs:
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            anchore/syft:v1.44.0 \
+            anchore/syft:v1.44.0@sha256:86fde6445b483d902fe011dd9f68c4987dd94e07da1e9edc004e3c2422650de6 \
             "${TARGET_WITH_DIGEST}" \
             -o cyclonedx-json \
             > "sbom-${IMAGE_ID}-cyclonedx.json"
@@ -373,7 +471,7 @@ jobs:
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            anchore/syft:v1.44.0 \
+            anchore/syft:v1.44.0@sha256:86fde6445b483d902fe011dd9f68c4987dd94e07da1e9edc004e3c2422650de6 \
             "${TARGET_WITH_DIGEST}" \
             -o spdx-json \
             > "sbom-${IMAGE_ID}-spdx.json"
@@ -461,6 +559,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # SANCTIONED EXCEPTION to the repo's "never push directly to main" rule:
+      # this bot commits only catalog/approved-lock.yaml (machine-generated
+      # promotion state) with [skip ci], gated on a successful promote on main.
+      # The commit is currently unsigned; GPG-signing the bot commit requires a
+      # dedicated signing key in secrets (tracked as A3 follow-up).
       - name: Update approved-lock with conflict-safe retry
         env:
           IMAGE_ID: ${{ inputs.image_id }}
@@ -469,31 +572,43 @@ jobs:
           TARGET_DIGEST: ${{ needs.promote.outputs.target_digest }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
         run: |
-          pip install pyyaml --quiet
+          pip install --quiet "pyyaml==6.0.3"
 
-          # Authenticate the remote explicitly (checkout did not persist creds).
-          git remote set-url origin \
-            "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          # Mask the token and pass it only as a per-command auth header so it is
+          # never written into .git/config (persist-credentials: false).
+          echo "::add-mask::${GH_TOKEN}"
+          AUTH_B64="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          AUTH_HEADER="AUTHORIZATION: basic ${AUTH_B64}"
 
           PROMOTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           MAX_RETRIES=5
 
-          for ATTEMPT in $(seq 1 $MAX_RETRIES); do
-            # Reset lock file to HEAD state and pull latest remote changes
-            git checkout -- catalog/approved-lock.yaml
-            git pull --rebase origin main
+          for ATTEMPT in $(seq 1 "${MAX_RETRIES}"); do
+            # Discard any local lock edit, then rebase on latest main. A failed
+            # rebase is the exact conflict this loop exists for: abort it and
+            # retry instead of letting `set -e` kill the whole step.
+            git checkout -- catalog/approved-lock.yaml 2>/dev/null || true
+            if ! git -c http.extraheader="${AUTH_HEADER}" pull --rebase origin main; then
+              git rebase --abort 2>/dev/null || true
+              echo "::warning::pull --rebase failed on attempt ${ATTEMPT}/${MAX_RETRIES}; retrying."
+              sleep $((ATTEMPT * 2))
+              continue
+            fi
 
-            # Upsert our entry into the now-current lock file
-            python3 scripts/update_approved_lock.py \
-              --lock-file catalog/approved-lock.yaml \
-              --image-id    "${IMAGE_ID}" \
-              --ghcr-ref    "${GHCR_REF}" \
-              --source-digest "${SOURCE_DIGEST}" \
-              --target-digest "${TARGET_DIGEST}" \
-              --promoted-at "${PROMOTED_AT}" \
-              --promoted-by "${RUN_URL}"
+            # A failure here is a real error (bad input, malformed lock), not a
+            # retryable conflict.
+            if ! python3 scripts/update_approved_lock.py \
+                --lock-file catalog/approved-lock.yaml \
+                --image-id "${IMAGE_ID}" \
+                --ghcr-ref "${GHCR_REF}" \
+                --source-digest "${SOURCE_DIGEST}" \
+                --target-digest "${TARGET_DIGEST}" \
+                --promoted-at "${PROMOTED_AT}" \
+                --promoted-by "${RUN_URL}"; then
+              echo "::error::Lock updater failed (non-retryable)."
+              exit 1
+            fi
 
             git add catalog/approved-lock.yaml
             if git diff --cached --quiet; then
@@ -501,15 +616,21 @@ jobs:
               exit 0
             fi
 
-            git commit -m "chore(lock): promote ${IMAGE_ID} to approved-lock [skip ci]"
+            if ! git commit -m "chore(lock): promote ${IMAGE_ID} to approved-lock [skip ci]"; then
+              echo "::error::git commit failed (non-retryable)."
+              exit 1
+            fi
 
-            if git push origin HEAD:main; then
+            if git -c http.extraheader="${AUTH_HEADER}" push origin HEAD:main; then
               echo "Lock file updated successfully on attempt ${ATTEMPT}."
               exit 0
             fi
 
-            echo "Push conflict on attempt ${ATTEMPT}/${MAX_RETRIES}; backing off $((ATTEMPT * 2))s..."
-            git reset HEAD~1
+            echo "::warning::Push conflict on attempt ${ATTEMPT}/${MAX_RETRIES}; backing off $((ATTEMPT * 2))s..."
+            # Drop our local commit by SHA so a rebase-introduced commit is never
+            # discarded by a positional reset.
+            COMMIT_SHA="$(git rev-parse HEAD)"
+            git reset --hard "${COMMIT_SHA}~1"
             sleep $((ATTEMPT * 2))
           done
 
