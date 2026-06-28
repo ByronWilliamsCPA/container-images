@@ -122,6 +122,26 @@ images:
       supported: [linux/amd64]
     notes: "Primary Python base; used as FROM in cert-enroll, cloudflare-auth-validator"
 
+  - id: dhi-python-312-dev
+    display_name: "DHI Python 3.12 Dev (builder stage)"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: python
+      tag: "3.12-debian13-dev"
+    ghcr:
+      name: dhi-python
+      tag: "3.12-debian13-dev"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Builder-stage base with shell and apt; pair with dhi-python:3.12-debian13 as runtime stage."
+
   - id: dhi-python-311
     display_name: "DHI Python 3.11"
     source_tier: primary
