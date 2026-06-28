@@ -1,0 +1,34 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: c59bba8fb259db0fec2bbb77ad8ba51ea7341b56  # v0.15.20
+    hooks:
+      - id: ruff
+      - id: ruff-format
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: cba56bcde1fdd01c1deb3f945e69764c291a6530  # v1.38.0
+    hooks:
+      - id: yamllint
+        args: [--strict, -d, "{extends: relaxed, rules: {line-length: {max: 120}}}"]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: 68e8b45440415753fff70a312ece8da92ba85b4a  # v1.5.0  # pragma: allowlist secret
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+
+  - repo: local
+    hooks:
+      - id: no-em-dash
+        name: No em-dash characters
+        entry: bash -c 'if git diff --cached --name-only | xargs grep -l $'"'"'\xe2\x80\x94'"'"' 2>/dev/null; then echo "Em-dash character found. Use a comma, semicolon, or colon instead."; exit 1; fi'
+        language: system
+        pass_filenames: false

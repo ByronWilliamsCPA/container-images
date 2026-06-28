@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ImageCatalog
+
+metadata:
+  schema_version: "1.0"
+
+images:
+  - id: dhi-postgres-16
+    display_name: "DHI PostgreSQL 16"
+    source_tier: primary
+    criticality: critical
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: postgres
+      tag: "16-debian13"
+    ghcr:
+      name: dhi-postgres
+      tag: "16-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: distroless-static
+    display_name: "Distroless Static"
+    source_tier: distroless
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: gcr.io
+      name: distroless/static-debian12
+      tag: "latest"
+    ghcr:
+      name: distroless-static
+      tag: "latest"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]

@@ -1,0 +1,617 @@
+apiVersion: v1
+kind: ImageCatalog
+
+metadata:
+  schema_version: "1.0"
+  description: Approved container image catalog for homelab infrastructure
+  maintainer: ByronWilliamsCPA/container-images
+  last_updated: "2026-06-27"
+
+# Each entry defines one image family version.
+# Fields:
+#   id:                       unique slug, kebab-case
+#   display_name:             human-readable label
+#   source_tier:              primary (DHI) | distroless (Google Distroless)
+#   criticality:              critical | high | medium | low
+#   classification_status:    classified | pending
+#   disposition:              mirror_only | custom_derivative | decommission | exception_only
+#   image_modification:
+#     strategy:               mirror_only | replace_source | custom_derivative |
+#                             runtime_only_hardening | debug_split | decommission | exception_only
+#   upstream:
+#     registry:               source registry hostname
+#     name:                   image name (no registry prefix)
+#     tag:                    upstream mutable tag
+#   ghcr:
+#     name:                   name in ghcr.io/byronwilliamscpa/
+#     tag:                    tag to publish to GHCR
+#   platform_compatibility:
+#     default:                primary deploy platform
+#     supported:              list of supported OCI platforms
+#   notes:                    optional free-text
+
+images:
+
+  # ---------------------------------------------------------------------------
+  # Databases
+  # ---------------------------------------------------------------------------
+
+  - id: dhi-postgres-16
+    display_name: "DHI PostgreSQL 16"
+    source_tier: primary
+    criticality: critical
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: postgres
+      tag: "16-debian13"
+    ghcr:
+      name: dhi-postgres
+      tag: "16-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Primary PostgreSQL base; used by authentik, infisical, mission-control"
+
+  - id: dhi-postgres-14
+    display_name: "DHI PostgreSQL 14"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: postgres
+      tag: "14-debian13"
+    ghcr:
+      name: dhi-postgres
+      tag: "14-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Legacy PostgreSQL 14; retained for services pinned to PG14"
+
+  - id: dhi-redis-7
+    display_name: "DHI Redis 7"
+    source_tier: primary
+    criticality: critical
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: redis
+      tag: "7-debian13"
+    ghcr:
+      name: dhi-redis
+      tag: "7-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      # #ASSUME: redis-pi is the only known arm64 service requiring Redis.
+      # #VERIFY: confirm arm64 digest is available before adding linux/arm64 here.
+      supported: [linux/amd64]
+    notes: "Shared Redis; used by authentik, nornweave, renovate"
+
+  # ---------------------------------------------------------------------------
+  # Language Runtimes
+  # ---------------------------------------------------------------------------
+
+  - id: dhi-python-312
+    display_name: "DHI Python 3.12"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: python
+      tag: "3.12-debian13"
+    ghcr:
+      name: dhi-python
+      tag: "3.12-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Primary Python base; used as FROM in cert-enroll, cloudflare-auth-validator"
+
+  - id: dhi-python-312-dev
+    display_name: "DHI Python 3.12 Dev (builder stage)"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: python
+      tag: "3.12-debian13-dev"
+    ghcr:
+      name: dhi-python
+      tag: "3.12-debian13-dev"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Builder-stage base with shell and apt; pair with dhi-python:3.12-debian13 as runtime stage."
+
+  - id: dhi-python-311
+    display_name: "DHI Python 3.11"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: python
+      tag: "3.11-debian13"
+    ghcr:
+      name: dhi-python
+      tag: "3.11-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Secondary Python base for services requiring 3.11 compatibility"
+
+  - id: dhi-node-24
+    display_name: "DHI Node.js 24"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: node
+      tag: "24-debian13"
+    ghcr:
+      name: dhi-node
+      tag: "24-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: dhi-node-22
+    display_name: "DHI Node.js 22"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: node
+      tag: "22-debian13"
+    ghcr:
+      name: dhi-node
+      tag: "22-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  # ---------------------------------------------------------------------------
+  # Web Servers / Proxies
+  # ---------------------------------------------------------------------------
+
+  - id: dhi-nginx-127
+    display_name: "DHI nginx 1.27"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: nginx
+      # nginx 1.27 is debian12-only on DHI; switch once debian13 is published.
+      # #ASSUME: DHI will publish nginx 1.27 on debian13 once mainline stabilizes.
+      # #VERIFY: switch tag to 1.27-debian13 when available.
+      tag: "1.27"
+    ghcr:
+      name: dhi-nginx
+      tag: "1.27-debian12"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: dhi-nginx-126
+    display_name: "DHI nginx 1.26"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: nginx
+      tag: "1.26-debian13"
+    ghcr:
+      name: dhi-nginx
+      tag: "1.26-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: dhi-traefik-36
+    display_name: "DHI Traefik 3.6"
+    source_tier: primary
+    criticality: critical
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: traefik
+      tag: "3.6-debian13"
+    ghcr:
+      name: dhi-traefik
+      tag: "3.6-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Control-plane proxy; changing requires immediate drift scan"
+
+  - id: dhi-traefik-35
+    display_name: "DHI Traefik 3.5"
+    source_tier: primary
+    criticality: critical
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: traefik
+      tag: "3.5-debian13"
+    ghcr:
+      name: dhi-traefik
+      tag: "3.5-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Previous Traefik version; retained for rollback"
+
+  # ---------------------------------------------------------------------------
+  # Availability Monitoring
+  # ---------------------------------------------------------------------------
+
+  - id: dhi-uptime-kuma-1
+    display_name: "DHI Uptime Kuma 1"
+    source_tier: primary
+    criticality: low
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: uptime-kuma
+      tag: "1-debian13"
+    ghcr:
+      name: dhi-uptime-kuma
+      tag: "1-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  # ---------------------------------------------------------------------------
+  # Observability Stack
+  # ---------------------------------------------------------------------------
+
+  - id: dhi-grafana-123
+    display_name: "DHI Grafana 12.3"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: grafana
+      tag: "12.3-debian13"
+    ghcr:
+      name: dhi-grafana
+      tag: "12.3-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: dhi-grafana-116
+    display_name: "DHI Grafana 11.6"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: grafana
+      tag: "11.6-debian13"
+    ghcr:
+      name: dhi-grafana
+      tag: "11.6-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Previous Grafana version; retained for rollback"
+
+  - id: dhi-prometheus-38
+    display_name: "DHI Prometheus 3.8"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: prometheus
+      tag: "3.8-debian13"
+    ghcr:
+      name: dhi-prometheus
+      tag: "3.8-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: dhi-prometheus-35
+    display_name: "DHI Prometheus 3.5"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: prometheus
+      tag: "3.5-debian13"
+    ghcr:
+      name: dhi-prometheus
+      tag: "3.5-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Previous Prometheus version; retained for rollback"
+
+  - id: dhi-loki-36
+    display_name: "DHI Loki 3.6"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: loki
+      tag: "3.6-debian13"
+    ghcr:
+      name: dhi-loki
+      tag: "3.6-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: dhi-loki-29
+    display_name: "DHI Loki 2.9"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: loki
+      tag: "2.9-debian13"
+    ghcr:
+      name: dhi-loki
+      tag: "2.9-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Previous Loki version; retained for rollback"
+
+  - id: dhi-promtail-35
+    display_name: "DHI Promtail 3.5"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: promtail
+      tag: "3.5-debian13"
+    ghcr:
+      name: dhi-promtail
+      tag: "3.5-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  # ---------------------------------------------------------------------------
+  # Observability Exporters
+  # ---------------------------------------------------------------------------
+
+  - id: dhi-node-exporter-1
+    display_name: "DHI Node Exporter 1"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: node-exporter
+      tag: "1-debian13"
+    ghcr:
+      name: dhi-node-exporter
+      tag: "1-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: dhi-postgres-exporter-0
+    display_name: "DHI PostgreSQL Exporter 0"
+    source_tier: primary
+    criticality: low
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: postgres-exporter
+      tag: "0-debian13"
+    ghcr:
+      name: dhi-postgres-exporter
+      tag: "0-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: dhi-redis-exporter-1
+    display_name: "DHI Redis Exporter 1"
+    source_tier: primary
+    criticality: low
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: redis-exporter
+      tag: "1-debian13"
+    ghcr:
+      name: dhi-redis-exporter
+      tag: "1-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: dhi-alloy-1
+    display_name: "DHI Grafana Alloy 1"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: alloy
+      tag: "1-debian13"
+    ghcr:
+      name: dhi-alloy
+      tag: "1-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Next-gen replacement for Promtail; DHI publishes as alloy"
+
+  # ---------------------------------------------------------------------------
+  # Build Tooling
+  # ---------------------------------------------------------------------------
+
+  - id: dhi-uv-0
+    display_name: "DHI uv 0"
+    source_tier: primary
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: uv
+      tag: "0-debian13"
+    ghcr:
+      name: dhi-uv
+      tag: "0-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "uv package manager base image for Python service builds"
+
+  # ---------------------------------------------------------------------------
+  # Google Distroless (distroless tier)
+  # ---------------------------------------------------------------------------
+
+  - id: distroless-python3
+    display_name: "Distroless Python 3 (Debian 12)"
+    source_tier: distroless
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: gcr.io
+      name: distroless/python3-debian12
+      tag: "latest"
+    ghcr:
+      name: distroless-python3
+      tag: "latest"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Minimal distroless Python base; no shell, no package manager"
+
+  - id: distroless-nodejs20
+    display_name: "Distroless Node.js 20 (Debian 12)"
+    source_tier: distroless
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: gcr.io
+      name: distroless/nodejs20-debian12
+      tag: "latest"
+    ghcr:
+      name: distroless-nodejs20
+      tag: "latest"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+
+  - id: distroless-static
+    display_name: "Distroless Static (Debian 12)"
+    source_tier: distroless
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: gcr.io
+      name: distroless/static-debian12
+      tag: "latest"
+    ghcr:
+      name: distroless-static
+      tag: "latest"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Minimal static binary base; no libc, no shell"
