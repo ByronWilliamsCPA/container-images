@@ -56,6 +56,14 @@ def resolve_output_path(raw: str) -> Path | None:
         return None
     candidate = Path(raw)
     if not candidate.is_absolute() or not candidate.parent.is_dir():
+        # GITHUB_OUTPUT was set but is not a writable absolute path: warn so a
+        # CI misconfiguration is visible rather than silently swallowed into the
+        # stdout fallback (an empty/unset value is the expected local-run case).
+        print(
+            f"WARNING: GITHUB_OUTPUT={raw!r} is not a writable absolute path; "
+            "falling back to stdout",
+            file=sys.stderr,
+        )
         return None
     return candidate
 
