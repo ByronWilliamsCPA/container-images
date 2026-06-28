@@ -19,14 +19,15 @@ on:
       - 'tests/**'
       - '.github/workflows/validate-catalog-schema.yml'
 
+  # #CRITICAL "Validate catalog schema" is a required status check in branch
+  # protection. A required check MUST report a result on every PR to main, so
+  # this trigger deliberately has no `paths:` filter. A path-filtered required
+  # check is skipped on non-matching PRs, never reports, and leaves the PR
+  # stuck on "Expected - Waiting for status to be reported" indefinitely.
+  # #VERIFY before re-adding any `paths:` here, confirm this check is no longer
+  # required in the repo ruleset and branch protection, or PRs will deadlock.
   pull_request:
     branches: [main]
-    paths:
-      - 'catalog/images.yaml'
-      - 'scripts/validate_catalog_schema.py'
-      - 'scripts/build_matrix.py'
-      - 'tests/**'
-      - '.github/workflows/validate-catalog-schema.yml'
 
   merge_group:
 
@@ -55,7 +56,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
