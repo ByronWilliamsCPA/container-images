@@ -80,12 +80,16 @@ Every DHI image in this mirror carries:
 
 - SLSA Level 3 provenance (from DHI upstream)
 - CycloneDX SBOM attestation via cosign keyless signing
-- Multi-arch manifests (AMD64 and ARM64 under the same tag)
+- AMD64; ARM64 planned
 
 ## Requesting a new image
 
-Open a pull request adding an entry to the matrix in
-`.github/workflows/mirror-hardened-images.yml`.
+Open a pull request that adds an entry to `catalog/images.yaml` following the
+schema defined in that file. Validate the catalog locally before pushing:
+
+```bash
+python3 scripts/validate_catalog_schema.py
+```
 
 ## License
 

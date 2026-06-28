@@ -1,0 +1,61 @@
+# REUSE Compliance Check for container-images
+# Validates REUSE 3.0 specification compliance for license management.
+#
+# Pattern: an in-line job named "Check REUSE Compliance" emits the literal
+# check context "Check REUSE Compliance" required by the org default-branch
+# ruleset. Calling the org-level reusable workflow would instead emit
+# "Check REUSE Compliance / REUSE Compliance Check" and miss the required
+# context.
+#
+# REUSE documentation: https://reuse.software/
+name: REUSE Compliance
+
+# PR-only: "Check REUSE Compliance" is a required status check in the org
+# default-branch ruleset, so every merge already validated this exact tree on
+# the PR. A post-merge push run re-checks identical content for no gain.
+"on":
+  pull_request:
+    paths:
+      - "**/*"
+      - "REUSE.toml"
+      - "LICENSES/**"
+      - ".github/workflows/reuse.yml"
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: reuse-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reuse:
+    name: Check REUSE Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: REUSE Compliance Check
+        uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6.0.0
+
+      - name: Generate REUSE SPDX
+        if: success()
+        run: |
+          docker run --rm --volume "$(pwd)":/data fsfe/reuse:latest spdx --output /data/reuse-spdx.json
+
+      - name: Upload REUSE SPDX
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reuse-spdx
+          path: reuse-spdx.json
+          retention-days: 90

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ImagePolicies
+
+metadata:
+  schema_version: "1.0"
+  description: Scanner and exception policies for the image promotion pipeline
+  maintainer: ByronWilliamsCPA/container-images
+  last_updated: "2026-06-27"
+
+# A2 will populate the scanner policy and exception framework.
+# Placeholder present so downstream tooling can check file existence.
+
+scanner_policy:
+  # Threshold for blocking promotion. A2 implementation.
+  # critical: block
+  # high: block
+  # medium: ticket
+  # low: record
+  placeholder: true
+
+exceptions: []

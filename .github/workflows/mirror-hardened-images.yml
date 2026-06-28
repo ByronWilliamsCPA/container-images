@@ -1,14 +1,22 @@
+# yamllint disable rule:line-length
 # =============================================================================
 # Mirror Hardened Container Images to GHCR
 # =============================================================================
 # Mirrors hardened images from upstream registries (dhi.io, gcr.io) to
 # GitHub Container Registry (ghcr.io/byronwilliamscpa/) as public repos.
 #
+# A0: Matrix is driven by catalog/images.yaml (not hardcoded inline).
+#     Adding an image = one catalog entry.
+# A1: Uses crane copy by digest (not docker pull/tag/push). The upstream
+#     digest is resolved, then the copy is pinned to that digest, then the
+#     target digest is asserted to match. No TOCTOU gap.
+#
 # Images are available without authentication:
 #   docker pull ghcr.io/byronwilliamscpa/dhi-postgres:16-debian13
 #
 # Setup:
-#   Add org secrets DHI_REGISTRY_USERNAME and DHI_REGISTRY_TOKEN.
+#   Org secrets: DHI_REGISTRY_USERNAME, DHI_REGISTRY_TOKEN
+#   GitHub Environment: publish (holds DHI token, signing permissions)
 # =============================================================================
 
 name: Mirror Hardened Images to GHCR
@@ -30,6 +38,7 @@ on:
       - main
     paths:
       - '.github/workflows/mirror-hardened-images.yml'
+      - 'catalog/images.yaml'
 
 # Serialize runs: killing a mirror mid-push could leave a partial tag in GHCR.
 concurrency:
@@ -37,250 +46,378 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GHCR_REGISTRY: ghcr.io
+  CRANE_VERSION: "0.20.2"
 
 permissions:
   contents: read
 
 jobs:
   # ===========================================================================
-  # Job 1: Mirror DHI Images
+  # Prepare: Validate catalog and build image matrices
   # ===========================================================================
-  mirror-dhi:
-    name: Mirror DHI
+  prepare:
+    name: Validate catalog + build matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
 
     permissions:
       contents: read
-      packages: write
-      id-token: write  # Required for keyless cosign signing
 
-    strategy:
-      fail-fast: false
-      matrix:
-        image:
-          # Database images
-          - {name: "postgres", tag: "16-debian13", ghcr_tag: "16-debian13"}
-          - {name: "postgres", tag: "14-debian13", ghcr_tag: "14-debian13"}
-          - {name: "redis", tag: "7-debian13", ghcr_tag: "7-debian13"}
-
-          # Python images
-          - {name: "python", tag: "3.12-debian13", ghcr_tag: "3.12-debian13"}
-          - {name: "python", tag: "3.11-debian13", ghcr_tag: "3.11-debian13"}
-
-          # Node.js images
-          - {name: "node", tag: "24-debian13", ghcr_tag: "24-debian13"}
-          - {name: "node", tag: "22-debian13", ghcr_tag: "22-debian13"}
-
-          # Web server images
-          # nginx 1.27 is debian12-only on DHI; switch once debian13 is published
-          # #ASSUME: DHI will publish nginx 1.27 on debian13 once mainline stabilizes
-          # #VERIFY: switch ghcr_tag from 1.27-debian12 to 1.27-debian13 once available
-          - {name: "nginx", tag: "1.27", ghcr_tag: "1.27-debian12"}
-          - {name: "nginx", tag: "1.26", ghcr_tag: "1.26-debian13"}
-
-          # Infrastructure images
-          - {name: "traefik", tag: "3.6-debian13", ghcr_tag: "3.6-debian13"}
-          - {name: "traefik", tag: "3.5-debian13", ghcr_tag: "3.5-debian13"}
-          - {name: "uptime-kuma", tag: "1-debian13", ghcr_tag: "1-debian13"}
-
-          # Monitoring stack
-          - {name: "grafana", tag: "12.3-debian13", ghcr_tag: "12.3-debian13"}
-          - {name: "grafana", tag: "11.6-debian13", ghcr_tag: "11.6-debian13"}
-          - {name: "prometheus", tag: "3.8-debian13", ghcr_tag: "3.8-debian13"}
-          - {name: "prometheus", tag: "3.5-debian13", ghcr_tag: "3.5-debian13"}
-          - {name: "loki", tag: "3.6-debian13", ghcr_tag: "3.6-debian13"}
-          - {name: "loki", tag: "2.9-debian13", ghcr_tag: "2.9-debian13"}
-          - {name: "promtail", tag: "3.5-debian13", ghcr_tag: "3.5-debian13"}
-          - {name: "node-exporter", tag: "1-debian13", ghcr_tag: "1-debian13"}
-
-          # Monitoring exporters (DHI uses upstream project names, not marketing names)
-          - {name: "postgres-exporter", tag: "0-debian13", ghcr_tag: "0-debian13"}
-          - {name: "redis-exporter", tag: "1-debian13", ghcr_tag: "1-debian13"}
-          # Grafana Alloy: next-gen replacement for Promtail; DHI publishes as "alloy"
-          - {name: "alloy", tag: "1-debian13", ghcr_tag: "1-debian13"}
-
-          # Tooling
-          - {name: "uv", tag: "0-debian13", ghcr_tag: "0-debian13"}
+    outputs:
+      dhi_matrix: ${{ steps.build-matrix.outputs.dhi_matrix }}
+      distroless_matrix: ${{ steps.build-matrix.outputs.distroless_matrix }}
+      dhi_count: ${{ steps.build-matrix.outputs.dhi_count }}
+      distroless_count: ${{ steps.build-matrix.outputs.distroless_count }}
 
     steps:
+      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
-      - name: Mask DHI registry credentials
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install pyyaml --quiet
+
+      - name: Validate catalog schema (exit gate)
+        run: python3 scripts/validate_catalog_schema.py catalog/images.yaml
+
+      - name: Build image matrices from catalog
+        id: build-matrix
+        run: python3 scripts/build_matrix.py catalog/images.yaml
+
+  # ===========================================================================
+  # Mirror DHI Images (A1: crane copy by digest)
+  # ===========================================================================
+  mirror-dhi:
+    name: "Mirror DHI ${{ matrix.ghcr_name }}:${{ matrix.ghcr_tag }}"
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: publish
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # keyless cosign signing
+      security-events: write  # Trivy SARIF upload
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.dhi_matrix) }}
+
+    steps:
+      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install crane
+        run: |
+          curl -sL \
+            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+            -o crane.tar.gz
+          tar xz -C /usr/local/bin crane < crane.tar.gz
+          rm crane.tar.gz
+          crane version
+
+      - name: Verify crane checksum
+        run: |
+          curl -sL \
+            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
+            -o checksums.txt
+          grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
+
+      - name: Mask registry credentials
         run: |
           echo "::add-mask::${{ secrets.DHI_REGISTRY_USERNAME }}"
           echo "::add-mask::${{ secrets.DHI_REGISTRY_TOKEN }}"
+          echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Login to DHI Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
-        with:
-          registry: dhi.io
-          username: ${{ secrets.DHI_REGISTRY_USERNAME }}
-          password: ${{ secrets.DHI_REGISTRY_TOKEN }}
-
-      - name: Mask GitHub token
-        run: echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull, tag, and push to GHCR
+      - name: Authenticate crane to registries
         env:
-          IMAGE_NAME: ${{ matrix.image.name }}
-          IMAGE_TAG: ${{ matrix.image.tag }}
-          IMAGE_GHCR_TAG: ${{ matrix.image.ghcr_tag }}
+          DHI_USER: ${{ secrets.DHI_REGISTRY_USERNAME }}
+          DHI_PASS: ${{ secrets.DHI_REGISTRY_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          crane auth login dhi.io --username "${DHI_USER}" --password "${DHI_PASS}"
+          crane auth login ghcr.io --username "${GHCR_USER}" --password "${GHCR_PASS}"
+
+      # A1: resolve exact upstream digest, copy content-addressed, assert equality
+      - name: Resolve upstream digest and copy to GHCR
+        id: copy
+        env:
+          UPSTREAM_REGISTRY: ${{ matrix.upstream_registry }}
+          UPSTREAM_NAME: ${{ matrix.upstream_name }}
+          UPSTREAM_TAG: ${{ matrix.upstream_tag }}
+          GHCR_NAME: ${{ matrix.ghcr_name }}
+          GHCR_TAG: ${{ matrix.ghcr_tag }}
+          PLATFORM: ${{ matrix.platform }}
           GHCR_OWNER: ${{ github.repository_owner }}
         run: |
-          GHCR_OWNER=$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')
-          SOURCE="dhi.io/${IMAGE_NAME}:${IMAGE_TAG}"
-          TARGET="ghcr.io/${GHCR_OWNER}/dhi-${IMAGE_NAME}:${IMAGE_GHCR_TAG}"
+          GHCR_OWNER=$(echo "${GHCR_OWNER}" | tr '[:upper:]' '[:lower:]')
+          SOURCE="${UPSTREAM_REGISTRY}/${UPSTREAM_NAME}:${UPSTREAM_TAG}"
+          TARGET="ghcr.io/${GHCR_OWNER}/${GHCR_NAME}:${GHCR_TAG}"
 
-          echo "Mirroring: ${SOURCE} -> ${TARGET}"
-          docker pull "${SOURCE}"
-          docker tag "${SOURCE}" "${TARGET}"
-          docker push "${TARGET}"
+          echo "Source: ${SOURCE}  Platform: ${PLATFORM}"
+          echo "Target: ${TARGET}"
 
-          echo "Image: ${TARGET}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Source: ${SOURCE}" >> "$GITHUB_STEP_SUMMARY"
+          # Resolve the exact platform digest from the upstream registry
+          SOURCE_DIGEST=$(crane digest "${SOURCE}" --platform "${PLATFORM}")
+          echo "Source digest: ${SOURCE_DIGEST}"
+
+          # Copy content-addressed: upstream tag is mutable; the digest is not
+          crane copy "${SOURCE}@${SOURCE_DIGEST}" "${TARGET}"
+
+          # Assert: target must carry the same digest we resolved from source
+          TARGET_DIGEST=$(crane digest "${TARGET}")
+          if [ "${SOURCE_DIGEST}" != "${TARGET_DIGEST}" ]; then
+            echo "::error::Digest mismatch!"
+            echo "::error::  Source: ${SOURCE_DIGEST}"
+            echo "::error::  Target: ${TARGET_DIGEST}"
+            exit 1
+          fi
+          echo "Digest verified: ${SOURCE_DIGEST}"
+
+          echo "source=${SOURCE}" >> "${GITHUB_OUTPUT}"
+          echo "target=${TARGET}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${TARGET_DIGEST}" >> "${GITHUB_OUTPUT}"
+          echo "source_ref=${SOURCE}@${SOURCE_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+          echo "| Image | \`${TARGET}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Source | \`${SOURCE}@${SOURCE_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Digest | \`${TARGET_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
-      - name: Generate and attest SBOM
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: ${{ steps.copy.outputs.target }}@${{ steps.copy.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to Security tab
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Generate SBOM with Syft
+        id: sbom
         env:
-          IMAGE_NAME: ${{ matrix.image.name }}
-          IMAGE_GHCR_TAG: ${{ matrix.image.ghcr_tag }}
-          GHCR_OWNER: ${{ github.repository_owner }}
+          GHCR_NAME: ${{ matrix.ghcr_name }}
+          TARGET: ${{ steps.copy.outputs.target }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
         run: |
-          GHCR_OWNER=$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')
-          TARGET="ghcr.io/${GHCR_OWNER}/dhi-${IMAGE_NAME}:${IMAGE_GHCR_TAG}"
-
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' \
-            "${TARGET}" 2>/dev/null | cut -d'@' -f2 || echo "")
-
-          if [ -z "$DIGEST" ]; then
-            echo "Could not get image digest, skipping SBOM attestation"
-            exit 0
-          fi
+          # Pull via digest so syft scans the exact promoted content
+          TARGET_WITH_DIGEST="${TARGET}@${DIGEST}"
+          echo "Generating SBOM for ${TARGET_WITH_DIGEST}..."
 
           # anchore/syft v1.44.0 as of 2026-05-02
+          # TODO: pin to digest once docker manifest inspect is available in CI
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             anchore/syft:v1.44.0 \
-            "${TARGET}" \
-            -o cyclonedx-json > "sbom-${IMAGE_NAME}.json"
+            "${TARGET_WITH_DIGEST}" \
+            -o cyclonedx-json > "sbom-${GHCR_NAME}.json"
 
+          COMPONENTS=$(jq '.components | length' "sbom-${GHCR_NAME}.json" 2>/dev/null || echo "N/A")
+          echo "SBOM components: ${COMPONENTS}"
+          echo "sbom_file=sbom-${GHCR_NAME}.json" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign image with Cosign
+        if: github.ref == 'refs/heads/main'
+        env:
+          TARGET: ${{ steps.copy.outputs.target }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
+        run: |
+          cosign sign --yes "${TARGET}@${DIGEST}"
+          echo "Signed: ${TARGET}@${DIGEST}"
+
+      - name: Attest SBOM
+        if: github.ref == 'refs/heads/main' && steps.sbom.outputs.sbom_file != ''
+        env:
+          TARGET: ${{ steps.copy.outputs.target }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
+          SBOM_FILE: ${{ steps.sbom.outputs.sbom_file }}
+        run: |
           cosign attest --yes \
-            --predicate "sbom-${IMAGE_NAME}.json" \
+            --predicate "${SBOM_FILE}" \
             --type cyclonedx \
-            "${TARGET}@${DIGEST}" || echo "SBOM attestation failed (non-fatal)"
-
-          echo "SBOM: Attested" >> "$GITHUB_STEP_SUMMARY"
-        continue-on-error: true
+            "${TARGET}@${DIGEST}"
 
   # ===========================================================================
-  # Job 2: Mirror Google Distroless Images
+  # Mirror Distroless Images (A1: crane copy by digest)
   # ===========================================================================
   mirror-distroless:
-    name: Mirror Distroless
+    name: "Mirror ${{ matrix.ghcr_name }}:${{ matrix.ghcr_tag }}"
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: publish
 
     permissions:
       contents: read
       packages: write
       id-token: write
+      security-events: write  # Trivy SARIF upload
 
     strategy:
       fail-fast: false
-      matrix:
-        image:
-          - {name: "python3-debian12", ghcr_name: "distroless-python3", tag: "latest"}
-          - {name: "nodejs20-debian12", ghcr_name: "distroless-nodejs20", tag: "latest"}
-          - {name: "static-debian12", ghcr_name: "distroless-static", tag: "latest"}
+      matrix: ${{ fromJson(needs.prepare.outputs.distroless_matrix) }}
 
     steps:
+      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install crane
+        run: |
+          curl -sL \
+            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+            -o crane.tar.gz
+          tar xz -C /usr/local/bin crane < crane.tar.gz
+          rm crane.tar.gz
+          crane version
+
+      - name: Verify crane checksum
+        run: |
+          curl -sL \
+            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
+            -o checksums.txt
+          grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
+
       - name: Mask GitHub token
         run: echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Login to GHCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull, tag, and push
+      - name: Authenticate crane to GHCR
         env:
-          IMAGE_NAME: ${{ matrix.image.name }}
-          IMAGE_GHCR_NAME: ${{ matrix.image.ghcr_name }}
-          IMAGE_TAG: ${{ matrix.image.tag }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
+        run: crane auth login ghcr.io --username "${GHCR_USER}" --password "${GHCR_PASS}"
+
+      - name: Resolve upstream digest and copy to GHCR
+        id: copy
+        env:
+          UPSTREAM_REGISTRY: ${{ matrix.upstream_registry }}
+          UPSTREAM_NAME: ${{ matrix.upstream_name }}
+          UPSTREAM_TAG: ${{ matrix.upstream_tag }}
+          GHCR_NAME: ${{ matrix.ghcr_name }}
+          GHCR_TAG: ${{ matrix.ghcr_tag }}
+          PLATFORM: ${{ matrix.platform }}
           GHCR_OWNER: ${{ github.repository_owner }}
         run: |
-          GHCR_OWNER=$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')
-          SOURCE="gcr.io/distroless/${IMAGE_NAME}:${IMAGE_TAG}"
-          TARGET="ghcr.io/${GHCR_OWNER}/${IMAGE_GHCR_NAME}:${IMAGE_TAG}"
+          GHCR_OWNER=$(echo "${GHCR_OWNER}" | tr '[:upper:]' '[:lower:]')
+          SOURCE="${UPSTREAM_REGISTRY}/${UPSTREAM_NAME}:${UPSTREAM_TAG}"
+          TARGET="ghcr.io/${GHCR_OWNER}/${GHCR_NAME}:${GHCR_TAG}"
 
-          echo "Mirroring: ${SOURCE} -> ${TARGET}"
-          docker pull "${SOURCE}"
-          docker tag "${SOURCE}" "${TARGET}"
-          docker push "${TARGET}"
+          echo "Source: ${SOURCE}  Platform: ${PLATFORM}"
+          echo "Target: ${TARGET}"
+
+          SOURCE_DIGEST=$(crane digest "${SOURCE}" --platform "${PLATFORM}")
+          echo "Source digest: ${SOURCE_DIGEST}"
+
+          crane copy "${SOURCE}@${SOURCE_DIGEST}" "${TARGET}"
+
+          TARGET_DIGEST=$(crane digest "${TARGET}")
+          if [ "${SOURCE_DIGEST}" != "${TARGET_DIGEST}" ]; then
+            echo "::error::Digest mismatch!"
+            echo "::error::  Source: ${SOURCE_DIGEST}"
+            echo "::error::  Target: ${TARGET_DIGEST}"
+            exit 1
+          fi
+          echo "Digest verified: ${SOURCE_DIGEST}"
+
+          echo "source=${SOURCE}" >> "${GITHUB_OUTPUT}"
+          echo "target=${TARGET}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${TARGET_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+          echo "| Image | \`${TARGET}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Source | \`${SOURCE}@${SOURCE_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Digest | \`${TARGET_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
-      - name: Generate and attest SBOM
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: ${{ steps.copy.outputs.target }}@${{ steps.copy.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to Security tab
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Generate SBOM with Syft
+        id: sbom
         env:
-          IMAGE_GHCR_NAME: ${{ matrix.image.ghcr_name }}
-          IMAGE_TAG: ${{ matrix.image.tag }}
-          GHCR_OWNER: ${{ github.repository_owner }}
+          GHCR_NAME: ${{ matrix.ghcr_name }}
+          TARGET: ${{ steps.copy.outputs.target }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
         run: |
-          GHCR_OWNER=$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')
-          TARGET="ghcr.io/${GHCR_OWNER}/${IMAGE_GHCR_NAME}:${IMAGE_TAG}"
-
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' \
-            "${TARGET}" 2>/dev/null | cut -d'@' -f2 || echo "")
-
-          if [ -z "$DIGEST" ]; then
-            echo "Could not get image digest, skipping SBOM attestation"
-            exit 0
-          fi
-
+          TARGET_WITH_DIGEST="${TARGET}@${DIGEST}"
           # anchore/syft v1.44.0 as of 2026-05-02
+          # TODO: pin to digest once docker manifest inspect is available in CI
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             anchore/syft:v1.44.0 \
-            "${TARGET}" \
-            -o cyclonedx-json > "sbom-${IMAGE_GHCR_NAME}.json"
+            "${TARGET_WITH_DIGEST}" \
+            -o cyclonedx-json > "sbom-${GHCR_NAME}.json"
+          echo "sbom_file=sbom-${GHCR_NAME}.json" >> "${GITHUB_OUTPUT}"
 
+      - name: Sign image with Cosign
+        if: github.ref == 'refs/heads/main'
+        env:
+          TARGET: ${{ steps.copy.outputs.target }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
+        run: cosign sign --yes "${TARGET}@${DIGEST}"
+
+      - name: Attest SBOM
+        if: github.ref == 'refs/heads/main' && steps.sbom.outputs.sbom_file != ''
+        env:
+          TARGET: ${{ steps.copy.outputs.target }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
+          SBOM_FILE: ${{ steps.sbom.outputs.sbom_file }}
+        run: |
           cosign attest --yes \
-            --predicate "sbom-${IMAGE_GHCR_NAME}.json" \
+            --predicate "${SBOM_FILE}" \
             --type cyclonedx \
-            "${TARGET}@${DIGEST}" || echo "SBOM attestation failed (non-fatal)"
-
-          echo "Image: ${TARGET}" >> "$GITHUB_STEP_SUMMARY"
-          echo "SBOM: Attested" >> "$GITHUB_STEP_SUMMARY"
-        continue-on-error: true
+            "${TARGET}@${DIGEST}"
 
   # ===========================================================================
-  # Job 3: Summary
+  # Summary
   # ===========================================================================
   summary:
     name: Mirror Summary
-    needs: [mirror-dhi, mirror-distroless]
+    needs: [prepare, mirror-dhi, mirror-distroless]
     runs-on: ubuntu-latest
     if: always()
 
@@ -288,6 +425,7 @@ jobs:
       contents: read
 
     steps:
+      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -297,22 +435,36 @@ jobs:
         env:
           DHI_RESULT: ${{ needs.mirror-dhi.result }}
           DISTROLESS_RESULT: ${{ needs.mirror-distroless.result }}
+          DHI_COUNT: ${{ needs.prepare.outputs.dhi_count }}
+          DISTROLESS_COUNT: ${{ needs.prepare.outputs.distroless_count }}
           RUN_NUMBER: ${{ github.run_number }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          echo "# Image Mirror Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Run:** ${RUN_NUMBER} | **Trigger:** ${EVENT_NAME}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Job | Status |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-----|--------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| DHI Images | ${DHI_RESULT} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Distroless Images | ${DISTROLESS_RESULT} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "# Image Mirror Summary" >> "${GITHUB_STEP_SUMMARY}"
+          echo "**Run:** ${RUN_NUMBER} | **Trigger:** ${EVENT_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Job | Images | Status |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "|-----|--------|--------|" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| DHI (primary tier) | ${DHI_COUNT} | ${DHI_RESULT} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Distroless | ${DISTROLESS_COUNT} | ${DISTROLESS_RESULT} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "**Copy method:** crane copy by digest (A1)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "**Matrix source:** catalog/images.yaml (A0)" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Check for failures
         env:
           DHI_RESULT: ${{ needs.mirror-dhi.result }}
+          DISTROLESS_RESULT: ${{ needs.mirror-distroless.result }}
         run: |
+          FAILED=0
           if [ "${DHI_RESULT}" = "failure" ]; then
-            echo "::error::Some image mirrors failed. Check job logs for details."
+            echo "::error::Some DHI image mirrors failed. Check job logs for details."
+            FAILED=1
+          fi
+          if [ "${DISTROLESS_RESULT}" = "failure" ]; then
+            echo "::error::Some Distroless image mirrors failed. Check job logs for details."
+            FAILED=1
+          fi
+          if [ "${FAILED}" = "1" ]; then
             exit 1
           fi

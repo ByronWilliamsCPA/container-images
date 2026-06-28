@@ -1,0 +1,52 @@
+# REUSE Software Bill of Materials
+# https://reuse.software/
+# Centralized licensing for the container-images repo, avoiding per-file SPDX headers.
+
+version = 1
+SPDX-PackageName = "container-images"
+SPDX-PackageSupplier = "Byron Williams"
+SPDX-PackageDownloadLocation = "https://github.com/ByronWilliamsCPA/container-images"
+
+# Source code (Python scripts, tests) - MIT
+[[annotations]]
+path = [
+    "scripts/**",
+    "tests/**",
+    "*.py",
+]
+SPDX-License-Identifier = "MIT"
+SPDX-FileCopyrightText = "2025 Byron Williams"
+
+# Catalog data (YAML configuration) - MIT
+[[annotations]]
+path = [
+    "catalog/**",
+]
+SPDX-License-Identifier = "MIT"
+SPDX-FileCopyrightText = "2025 Byron Williams"
+
+# GitHub workflows and CI configuration - MIT
+[[annotations]]
+path = [
+    ".github/**",
+    ".gitignore",
+    ".yamllint",
+    ".vscode/**",
+    ".pre-commit-config.yaml",
+    ".secrets.baseline",
+    "pyproject.toml",
+]
+SPDX-License-Identifier = "MIT"
+SPDX-FileCopyrightText = "2025 Byron Williams"
+
+# Documentation - CC-BY-4.0
+[[annotations]]
+path = [
+    "*.md",
+    "**/*.md",
+    "docs/**",
+    ".claude/**",
+    "!LICENSES/*.txt",
+]
+SPDX-License-Identifier = "CC-BY-4.0"
+SPDX-FileCopyrightText = "2025 Byron Williams"

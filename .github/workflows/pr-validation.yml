@@ -1,0 +1,144 @@
+# PR Validation for container-images
+#
+# Runs linting, tests, and dependency checks on every PR targeting main.
+# The final "validation-summary" job emits the check context
+# "Dependency & Standards Validation" required by the org default-branch ruleset.
+name: PR Validation
+
+"on":
+  pull_request:
+    branches:
+      - main
+  merge_group:
+
+# Cancel superseded runs on the same PR; the required check result comes from
+# the newest commit anyway, so stale runs only burn minutes.
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint Python scripts with Ruff
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Ruff Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Ruff
+        run: pip install ruff --quiet
+
+      - name: Ruff check
+        run: |
+          PY_DIRS=""
+          [ -d scripts ] && PY_DIRS="$PY_DIRS scripts/"
+          [ -d tests ] && PY_DIRS="$PY_DIRS tests/"
+          if [ -n "$PY_DIRS" ]; then
+            ruff check $PY_DIRS
+          else
+            echo "No Python source directories found, skipping"
+          fi
+
+      - name: Ruff format check
+        run: |
+          PY_DIRS=""
+          [ -d scripts ] && PY_DIRS="$PY_DIRS scripts/"
+          [ -d tests ] && PY_DIRS="$PY_DIRS tests/"
+          if [ -n "$PY_DIRS" ]; then
+            ruff format --check $PY_DIRS
+          else
+            echo "No Python source directories found, skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Run pytest test suite
+  # ---------------------------------------------------------------------------
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml pytest pip-audit --quiet
+
+      - name: Run tests
+        run: |
+          if [ -d tests ]; then
+            python3 -m pytest tests/ -v --tb=short
+          else
+            echo "No tests directory found, skipping"
+          fi
+
+      - name: Audit installed dependencies for known vulnerabilities
+        run: pip-audit
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # Aggregator: emits "Dependency & Standards Validation" required by org ruleset
+  # ---------------------------------------------------------------------------
+  validation-summary:
+    name: Dependency & Standards Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [lint, test]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Check validation results
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          echo "## PR Validation Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Check | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Ruff Lint | $LINT_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tests | $TEST_RESULT |" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$LINT_RESULT" != "success" ] || [ "$TEST_RESULT" != "success" ]; then
+            echo "::error::Dependency & Standards Validation failed: one or more required checks did not pass"
+            exit 1
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "All validation checks passed." >> "$GITHUB_STEP_SUMMARY"

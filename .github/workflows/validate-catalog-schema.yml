@@ -1,0 +1,77 @@
+# =============================================================================
+# Validate Container Image Catalog Schema
+# =============================================================================
+# Runs validate_catalog_schema.py and the pytest test suite whenever
+# catalog/images.yaml or the validation scripts change. This is the A0 exit
+# gate: every catalog entry must pass schema validation before any mirror job
+# can read the matrix.
+# =============================================================================
+
+name: Validate Catalog Schema
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'catalog/images.yaml'
+      - 'scripts/validate_catalog_schema.py'
+      - 'scripts/build_matrix.py'
+      - 'tests/**'
+      - '.github/workflows/validate-catalog-schema.yml'
+
+  pull_request:
+    branches: [main]
+    paths:
+      - 'catalog/images.yaml'
+      - 'scripts/validate_catalog_schema.py'
+      - 'scripts/build_matrix.py'
+      - 'tests/**'
+      - '.github/workflows/validate-catalog-schema.yml'
+
+  merge_group:
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate catalog schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    steps:
+      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml pytest --quiet
+
+      - name: Audit dependencies
+        run: |
+          pip install pip-audit --quiet
+          pip-audit
+
+      - name: Validate catalog schema
+        run: python3 scripts/validate_catalog_schema.py catalog/images.yaml
+
+      - name: Run tests (happy path + bypass-attempt cases)
+        run: python3 -m pytest tests/ -v --tb=short
+
+      - name: Dry-run matrix build
+        run: python3 scripts/build_matrix.py catalog/images.yaml
