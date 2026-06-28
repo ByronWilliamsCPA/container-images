@@ -140,8 +140,13 @@ jobs:
         with:
           egress-policy: audit
 
+      # persist-credentials: false -- this job uploads SBOM artifacts and never
+      # uses git auth (crane/docker/OIDC handle registry auth), so a persisted
+      # checkout token must not leak into those artifacts (zizmor artipacked).
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
       # ---- crane install + verify ------------------------------------------
 
@@ -442,10 +447,13 @@ jobs:
         with:
           egress-policy: audit
 
+      # persist-credentials: false so the token is not written to .git/config.
+      # This job uploads no artifacts, and the push step below sets an explicit
+      # token-authenticated remote URL at runtime (zizmor artipacked).
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Configure git bot identity
@@ -460,8 +468,14 @@ jobs:
           SOURCE_DIGEST: ${{ needs.promote.outputs.source_digest }}
           TARGET_DIGEST: ${{ needs.promote.outputs.target_digest }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           pip install pyyaml --quiet
+
+          # Authenticate the remote explicitly (checkout did not persist creds).
+          git remote set-url origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
 
           PROMOTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           MAX_RETRIES=5
