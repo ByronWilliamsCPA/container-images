@@ -32,6 +32,9 @@ path = [
     ".gitignore",
     ".yamllint",
     ".vscode/**",
+    ".pre-commit-config.yaml",
+    ".secrets.baseline",
+    "pyproject.toml",
 ]
 SPDX-License-Identifier = "MIT"
 SPDX-FileCopyrightText = "2025 Byron Williams"
@@ -40,7 +43,9 @@ SPDX-FileCopyrightText = "2025 Byron Williams"
 [[annotations]]
 path = [
     "*.md",
+    "**/*.md",
     "docs/**",
+    ".claude/**",
     "!LICENSES/*.txt",
 ]
 SPDX-License-Identifier = "CC-BY-4.0"
