@@ -105,7 +105,8 @@ def validate(catalog: dict[str, Any]) -> list[str]:
         if tier not in ALLOWED_SOURCE_TIERS:
             errors.append(
                 error(
-                    f"invalid source_tier {tier!r}; must be one of {sorted(ALLOWED_SOURCE_TIERS)}",
+                    f"invalid source_tier {tier!r}; "
+                    f"must be one of {sorted(ALLOWED_SOURCE_TIERS)}",
                     img_id,
                 )
             )
@@ -114,7 +115,8 @@ def validate(catalog: dict[str, Any]) -> list[str]:
         if crit not in ALLOWED_CRITICALITY:
             errors.append(
                 error(
-                    f"invalid criticality {crit!r}; must be one of {sorted(ALLOWED_CRITICALITY)}",
+                    f"invalid criticality {crit!r}; "
+                    f"must be one of {sorted(ALLOWED_CRITICALITY)}",
                     img_id,
                 )
             )
@@ -133,7 +135,8 @@ def validate(catalog: dict[str, Any]) -> list[str]:
         if disposition not in ALLOWED_DISPOSITION:
             errors.append(
                 error(
-                    f"invalid disposition {disposition!r}; must be one of {sorted(ALLOWED_DISPOSITION)}",
+                    f"invalid disposition {disposition!r}; "
+                    f"must be one of {sorted(ALLOWED_DISPOSITION)}",
                     img_id,
                 )
             )
@@ -225,7 +228,8 @@ def main() -> None:
 
     if errors:
         print(
-            f"FAIL: {len(errors)} validation error(s) in {CATALOG_PATH} ({image_count} images checked):"
+            f"FAIL: {len(errors)} validation error(s) in {CATALOG_PATH}"
+            f" ({image_count} images checked):"
         )
         for err in errors:
             print(err)

@@ -43,6 +43,7 @@ jobs:
       contents: read
 
     steps:
+      # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -58,6 +59,11 @@ jobs:
 
       - name: Install dependencies
         run: pip install pyyaml pytest --quiet
+
+      - name: Audit dependencies
+        run: |
+          pip install pip-audit --quiet
+          pip-audit
 
       - name: Validate catalog schema
         run: python3 scripts/validate_catalog_schema.py catalog/images.yaml

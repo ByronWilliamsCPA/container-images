@@ -1,0 +1,40 @@
+# =============================================================================
+# Dependency Review
+# =============================================================================
+# Reviews dependency changes on pull requests and blocks merges that introduce
+# known-vulnerable dependency versions. Requires a public repo or GitHub
+# Advanced Security.
+# =============================================================================
+
+name: Dependency Review
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          # TODO: transition to egress-policy: block once allowed-endpoints list is confirmed
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@38ecb5b593bf0eb19e335c03f97670f792489a8b # v4.7.0
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: always
