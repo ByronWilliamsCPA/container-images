@@ -1,0 +1,491 @@
+# =============================================================================
+# Publish Approved Image (A2 Reusable Workflow)
+# =============================================================================
+# Reusable workflow_call workflow that promotes a container image through the
+# full supply chain security pipeline before publishing it to GHCR.
+#
+# Pipeline stages (must all pass to promote):
+#   1. Resolve upstream digest (crane, TOCTOU-safe)
+#   2. Upstream Cosign check (advisory by default, required if input set)
+#   3. crane copy by digest to GHCR
+#   4. Snyk container scan (Critical/High block; Medium warn; Low record)
+#   5. Trivy container scan (Critical/High block, SARIF upload)
+#   6. Syft SBOM (CycloneDX JSON + SPDX JSON)
+#   7. Cosign keyless sign + CycloneDX SBOM attestation
+#   8. GitHub build provenance attestation
+#   9. Write approved-lock.yaml entry (gated: main branch + write_lock input)
+#
+# Usage:
+#   jobs:
+#     promote-postgres:
+#       uses: ByronWilliamsCPA/container-images/.github/workflows/publish-approved-image.yml@main
+#       with:
+#         image_id: dhi-postgres
+#         upstream_registry: dhi.io
+#         upstream_name: hardened/postgres
+#         upstream_tag: "16-debian13"
+#         ghcr_name: dhi-postgres
+#         ghcr_tag: "16-debian13"
+#       secrets:
+#         DHI_REGISTRY_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
+#         DHI_REGISTRY_TOKEN: ${{ secrets.DHI_REGISTRY_TOKEN }}
+#         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+#
+# Secrets:
+#   DHI_REGISTRY_USERNAME  -- DHI pull credential (optional; omit for public sources)
+#   DHI_REGISTRY_TOKEN     -- DHI pull credential (optional; omit for public sources)
+#   SNYK_TOKEN             -- Snyk API token (optional; Snyk stages skip if absent)
+#
+# Required org secrets: none beyond the above  # pragma: allowlist secret
+# Required environment: publish (holds signing OIDC trust)
+# =============================================================================
+
+name: Publish Approved Image
+
+on:
+  workflow_call:
+    inputs:
+      image_id:
+        description: Catalog image id (matches catalog/images.yaml id field)
+        required: true
+        type: string
+      upstream_registry:
+        description: Source registry hostname (e.g. dhi.io or gcr.io)
+        required: true
+        type: string
+      upstream_name:
+        description: Image name on the upstream registry (e.g. hardened/postgres)
+        required: true
+        type: string
+      upstream_tag:
+        description: Upstream tag to resolve (e.g. 16-debian13)
+        required: true
+        type: string
+      ghcr_name:
+        description: Image name on GHCR, without registry prefix (e.g. dhi-postgres)
+        required: true
+        type: string
+      ghcr_tag:
+        description: Tag to publish on GHCR (e.g. 16-debian13)
+        required: true
+        type: string
+      platform:
+        description: Target platform (passed to crane digest --platform)
+        required: false
+        type: string
+        default: linux/amd64
+      write_lock:
+        description: When true, commit the promotion entry to approved-lock.yaml (main only)
+        required: false
+        type: boolean
+        default: true
+      require_upstream_signature:
+        description: Fail promotion if no upstream Cosign signature is found
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      DHI_REGISTRY_USERNAME:
+        required: false
+      DHI_REGISTRY_TOKEN:
+        required: false
+      SNYK_TOKEN:
+        required: false
+    outputs:
+      promoted:
+        description: "true when all gates passed and the image was published"
+        value: ${{ jobs.promote.outputs.promoted }}
+      target_ref:
+        description: Full GHCR reference used for promotion (name:tag)
+        value: ${{ jobs.promote.outputs.target_ref }}
+      source_digest:
+        description: sha256 digest resolved from the upstream registry
+        value: ${{ jobs.promote.outputs.source_digest }}
+      target_digest:
+        description: sha256 digest confirmed on GHCR after crane copy
+        value: ${{ jobs.promote.outputs.target_digest }}
+
+env:
+  CRANE_VERSION: "0.20.2"
+
+jobs:
+  # ===========================================================================
+  # Promote: run all security gates and publish the image
+  # ===========================================================================
+  promote:
+    name: Promote ${{ inputs.image_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: publish
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write      # OIDC for keyless Cosign + GitHub attestation
+      attestations: write  # actions/attest-build-provenance
+      security-events: write  # Trivy + Snyk SARIF upload
+
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+    outputs:
+      promoted: ${{ steps.set-outputs.outputs.promoted }}
+      target_ref: ${{ steps.set-outputs.outputs.target_ref }}
+      source_digest: ${{ steps.set-outputs.outputs.source_digest }}
+      target_digest: ${{ steps.set-outputs.outputs.target_digest }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      # ---- crane install + verify ------------------------------------------
+
+      - name: Install crane
+        run: |
+          CRANE_BASE="https://github.com/google/go-containerregistry/releases/download"
+          curl -sL "${CRANE_BASE}/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+            -o crane.tar.gz
+          tar xz -C /usr/local/bin crane < crane.tar.gz
+          rm crane.tar.gz
+          crane version
+
+      - name: Verify crane checksum
+        run: |
+          curl -sL \
+            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
+            -o checksums.txt
+          grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
+
+      # ---- cosign install ---------------------------------------------------
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # ---- credentials -------------------------------------------------------
+
+      - name: Mask registry credentials
+        run: |
+          echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
+          if [ -n "${{ secrets.DHI_REGISTRY_TOKEN }}" ]; then
+            echo "::add-mask::${{ secrets.DHI_REGISTRY_TOKEN }}"
+          fi
+
+      - name: Authenticate crane to registries
+        env:
+          DHI_USER: ${{ secrets.DHI_REGISTRY_USERNAME }}
+          DHI_PASS: ${{ secrets.DHI_REGISTRY_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_REGISTRY: ${{ inputs.upstream_registry }}
+        run: |
+          if [ "${UPSTREAM_REGISTRY}" = "dhi.io" ] && [ -n "${DHI_USER}" ] && [ -n "${DHI_PASS}" ]; then
+            crane auth login dhi.io --username "${DHI_USER}" --password "${DHI_PASS}"
+          fi
+          crane auth login ghcr.io --username "${GHCR_USER}" --password "${GHCR_PASS}"
+
+      - name: Authenticate Docker to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      # ---- resolve upstream digest ------------------------------------------
+
+      - name: Resolve upstream digest
+        id: resolve
+        env:
+          PLATFORM: ${{ inputs.platform }}
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          SOURCE="${{ inputs.upstream_registry }}/${{ inputs.upstream_name }}:${{ inputs.upstream_tag }}"
+          GHCR_REF="ghcr.io/${OWNER}/${{ inputs.ghcr_name }}:${{ inputs.ghcr_tag }}"
+          GHCR_IMAGE="ghcr.io/${OWNER}/${{ inputs.ghcr_name }}"
+
+          echo "Resolving digest for ${SOURCE} (platform: ${PLATFORM})..."
+          SOURCE_DIGEST=$(crane digest "${SOURCE}" --platform "${PLATFORM}")
+          echo "Source digest: ${SOURCE_DIGEST}"
+
+          echo "upstream_ref=${SOURCE}"        >> "${GITHUB_ENV}"
+          echo "ghcr_ref=${GHCR_REF}"          >> "${GITHUB_ENV}"
+          echo "ghcr_image=${GHCR_IMAGE}"       >> "${GITHUB_ENV}"
+          echo "source_digest=${SOURCE_DIGEST}" >> "${GITHUB_ENV}"
+
+          echo "upstream_ref=${SOURCE}"        >> "${GITHUB_OUTPUT}"
+          echo "ghcr_ref=${GHCR_REF}"          >> "${GITHUB_OUTPUT}"
+          echo "source_digest=${SOURCE_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      # ---- upstream Cosign check (advisory by default) ----------------------
+
+      - name: Check upstream Cosign signature
+        env:
+          REQUIRE: ${{ inputs.require_upstream_signature }}
+        run: |
+          SIGNED_REF="${upstream_ref}@${source_digest}"
+          if cosign verify \
+              --certificate-identity-regexp=".*" \
+              --certificate-oidc-issuer-regexp=".*" \
+              "${SIGNED_REF}" 2>/dev/null; then
+            echo "::notice::Upstream Cosign signature verified: ${SIGNED_REF}"
+          else
+            MSG="No Cosign signature found on upstream image: ${SIGNED_REF}"
+            if [ "${REQUIRE}" = "true" ]; then
+              echo "::error::${MSG} (require_upstream_signature=true)"
+              exit 1
+            fi
+            echo "::warning::${MSG} (advisory; promotion continues)"
+          fi
+
+      # ---- crane copy with digest assertion ---------------------------------
+
+      - name: Copy image by digest to GHCR
+        id: copy
+        env:
+          PLATFORM: ${{ inputs.platform }}
+        run: |
+          echo "Copying ${upstream_ref}@${source_digest} -> ${ghcr_ref}..."
+          crane copy "${upstream_ref}@${source_digest}" "${ghcr_ref}"
+
+          TARGET_DIGEST=$(crane digest "${ghcr_ref}" --platform "${PLATFORM}")
+          if [ "${source_digest}" != "${TARGET_DIGEST}" ]; then
+            echo "::error::Digest mismatch after crane copy!"
+            echo "::error::  Source: ${source_digest}"
+            echo "::error::  Target: ${TARGET_DIGEST}"
+            exit 1
+          fi
+
+          echo "Digest verified: ${TARGET_DIGEST}"
+          echo "target_digest=${TARGET_DIGEST}" >> "${GITHUB_ENV}"
+          echo "target_digest=${TARGET_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Image | \`${ghcr_ref}\` |"
+            echo "| Source | \`${upstream_ref}@${source_digest}\` |"
+            echo "| Digest | \`${TARGET_DIGEST}\` |"
+            echo "| Platform | \`${PLATFORM}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # ---- Snyk (optional: skipped when SNYK_TOKEN is absent) ---------------
+
+      - name: Snyk gate (Critical and High block)
+        if: env.SNYK_TOKEN != ''
+        uses: snyk/actions/docker@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
+        env:
+          SNYK_TOKEN: ${{ env.SNYK_TOKEN }}
+        with:
+          image: ${{ env.ghcr_ref }}@${{ env.target_digest }}
+          args: --severity-threshold=high --sarif-file-output=snyk-high.sarif
+
+      - name: Snyk medium warning
+        if: env.SNYK_TOKEN != ''
+        env:
+          SNYK_TOKEN: ${{ env.SNYK_TOKEN }}
+          TARGET_WITH_DIGEST: ${{ env.ghcr_ref }}@${{ env.target_digest }}
+        run: |
+          MEDIUM_COUNT=$(
+            snyk container test "${TARGET_WITH_DIGEST}" \
+              --severity-threshold=medium --json 2>/dev/null \
+            | jq '[.vulnerabilities[]? | select(.severity == "medium")] | length' \
+            2>/dev/null || echo "0"
+          )
+          if [ "${MEDIUM_COUNT}" -gt "0" ]; then
+            MSG="Snyk: ${MEDIUM_COUNT} medium-severity issue(s) in ${{ inputs.image_id }}"
+            echo "::warning::${MSG} (policy: warn, not blocking)."
+          else
+            echo "Snyk medium check: 0 medium-severity issues."
+          fi
+        continue-on-error: true
+
+      - name: Upload Snyk SARIF to Security tab
+        if: always() && env.SNYK_TOKEN != ''
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        with:
+          sarif_file: snyk-high.sarif
+          category: snyk-${{ inputs.image_id }}
+
+      # ---- Trivy (always required) ------------------------------------------
+
+      - name: Trivy gate (Critical and High block)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          image-ref: ${{ env.ghcr_ref }}@${{ env.target_digest }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-${{ inputs.image_id }}
+
+      # ---- SBOM generation --------------------------------------------------
+
+      - name: Generate CycloneDX SBOM (Syft)
+        id: sbom-cdx
+        env:
+          TARGET_WITH_DIGEST: ${{ env.ghcr_ref }}@${{ env.target_digest }}
+          IMAGE_ID: ${{ inputs.image_id }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            anchore/syft:v1.44.0 \
+            "${TARGET_WITH_DIGEST}" \
+            -o cyclonedx-json \
+            > "sbom-${IMAGE_ID}-cyclonedx.json"
+
+          COMPONENTS=$(jq '.components | length' "sbom-${IMAGE_ID}-cyclonedx.json" 2>/dev/null || echo "N/A")
+          echo "CycloneDX components: ${COMPONENTS}"
+          echo "file=sbom-${IMAGE_ID}-cyclonedx.json" >> "${GITHUB_OUTPUT}"
+
+      - name: Generate SPDX SBOM (Syft)
+        id: sbom-spdx
+        env:
+          TARGET_WITH_DIGEST: ${{ env.ghcr_ref }}@${{ env.target_digest }}
+          IMAGE_ID: ${{ inputs.image_id }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            anchore/syft:v1.44.0 \
+            "${TARGET_WITH_DIGEST}" \
+            -o spdx-json \
+            > "sbom-${IMAGE_ID}-spdx.json"
+          echo "file=sbom-${IMAGE_ID}-spdx.json" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ inputs.image_id }}
+          path: |
+            sbom-${{ inputs.image_id }}-cyclonedx.json
+            sbom-${{ inputs.image_id }}-spdx.json
+          retention-days: 90
+
+      # ---- signing and attestation (main branch only) -----------------------
+
+      - name: Sign image with Cosign
+        if: github.ref == 'refs/heads/main'
+        env:
+          TARGET_WITH_DIGEST: ${{ env.ghcr_ref }}@${{ env.target_digest }}
+        run: |
+          cosign sign --yes "${TARGET_WITH_DIGEST}"
+          echo "Signed: ${TARGET_WITH_DIGEST}"
+
+      - name: Attest CycloneDX SBOM with Cosign
+        if: github.ref == 'refs/heads/main'
+        env:
+          TARGET_WITH_DIGEST: ${{ env.ghcr_ref }}@${{ env.target_digest }}
+          SBOM_FILE: ${{ steps.sbom-cdx.outputs.file }}
+        run: |
+          cosign attest --yes \
+            --predicate "${SBOM_FILE}" \
+            --type cyclonedx \
+            "${TARGET_WITH_DIGEST}"
+
+      - name: Generate GitHub build provenance attestation
+        if: github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ env.ghcr_image }}
+          subject-digest: ${{ env.target_digest }}
+          push-to-registry: true
+
+      # ---- job outputs -------------------------------------------------------
+
+      - name: Set job outputs
+        id: set-outputs
+        run: |
+          echo "promoted=true"                   >> "${GITHUB_OUTPUT}"
+          echo "target_ref=${ghcr_ref}"          >> "${GITHUB_OUTPUT}"
+          echo "source_digest=${source_digest}"  >> "${GITHUB_OUTPUT}"
+          echo "target_digest=${target_digest}"  >> "${GITHUB_OUTPUT}"
+
+  # ===========================================================================
+  # Update lock: write promotion entry to catalog/approved-lock.yaml
+  # Runs only on main branch when write_lock=true and promote succeeded.
+  # ===========================================================================
+  update-lock:
+    name: Update approved-lock for ${{ inputs.image_id }}
+    needs: promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: inputs.write_lock && needs.promote.outputs.promoted == 'true' && github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure git bot identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Update approved-lock with conflict-safe retry
+        env:
+          IMAGE_ID: ${{ inputs.image_id }}
+          GHCR_REF: ${{ needs.promote.outputs.target_ref }}
+          SOURCE_DIGEST: ${{ needs.promote.outputs.source_digest }}
+          TARGET_DIGEST: ${{ needs.promote.outputs.target_digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pip install pyyaml --quiet
+
+          PROMOTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          MAX_RETRIES=5
+
+          for ATTEMPT in $(seq 1 $MAX_RETRIES); do
+            # Reset lock file to HEAD state and pull latest remote changes
+            git checkout -- catalog/approved-lock.yaml
+            git pull --rebase origin main
+
+            # Upsert our entry into the now-current lock file
+            python3 scripts/update_approved_lock.py \
+              --lock-file catalog/approved-lock.yaml \
+              --image-id    "${IMAGE_ID}" \
+              --ghcr-ref    "${GHCR_REF}" \
+              --source-digest "${SOURCE_DIGEST}" \
+              --target-digest "${TARGET_DIGEST}" \
+              --promoted-at "${PROMOTED_AT}" \
+              --promoted-by "${RUN_URL}"
+
+            git add catalog/approved-lock.yaml
+            if git diff --cached --quiet; then
+              echo "Entry already present in lock file; nothing to commit."
+              exit 0
+            fi
+
+            git commit -m "chore(lock): promote ${IMAGE_ID} to approved-lock [skip ci]"
+
+            if git push origin HEAD:main; then
+              echo "Lock file updated successfully on attempt ${ATTEMPT}."
+              exit 0
+            fi
+
+            echo "Push conflict on attempt ${ATTEMPT}/${MAX_RETRIES}; backing off $((ATTEMPT * 2))s..."
+            git reset HEAD~1
+            sleep $((ATTEMPT * 2))
+          done
+
+          echo "::error::Failed to push approved-lock update after ${MAX_RETRIES} attempts."
+          exit 1

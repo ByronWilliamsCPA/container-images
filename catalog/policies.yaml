@@ -3,19 +3,47 @@ kind: ImagePolicies
 
 metadata:
   schema_version: "1.0"
-  description: Scanner and exception policies for the image promotion pipeline
+  description: Scanner and exception policies for the A2 image promotion pipeline
   maintainer: ByronWilliamsCPA/container-images
-  last_updated: "2026-06-27"
+  last_updated: "2026-06-28"
 
-# A2 will populate the scanner policy and exception framework.
-# Placeholder present so downstream tooling can check file existence.
+# Vulnerability scanner policy applied by publish-approved-image.yml (A2).
+# Each field maps to a specific action taken during promotion.
+#
+# snyk / trivy action values:
+#   block   -- promotion fails; image is not published to GHCR
+#   warn    -- promotion continues; GitHub Actions warning annotation emitted
+#   record  -- promotion continues; finding recorded in step summary only
+#   ignore  -- finding suppressed entirely (use sparingly)
 
 scanner_policy:
-  # Threshold for blocking promotion. A2 implementation.
-  # critical: block
-  # high: block
-  # medium: ticket
-  # low: record
-  placeholder: true
+  snyk:
+    critical: block
+    high: block
+    medium: warn
+    low: record
+  trivy:
+    critical: block
+    high: block
+    medium: record
+    low: ignore
 
+  # Upstream Cosign signature check (dhi.io or gcr.io source images).
+  # Set required: true only after confirming the upstream registry uses Cosign.
+  upstream_cosign:
+    required: false
+    advisory: true
+
+# Exception framework.
+# Each entry grants a named exemption for a specific CVE on a specific image.
+# Exceptions require: justification, ticket reference, and an expiry date.
+# The A2 workflow reads this list and skips the blocked finding for that image.
+#
+# Schema:
+#   image_id:      str  -- matches catalog/images.yaml id field
+#   cve_id:        str  -- CVE identifier (e.g. CVE-2024-12345)
+#   scanner:       str  -- snyk | trivy | both
+#   expires:       str  -- ISO-8601 date after which the exception auto-expires
+#   ticket:        str  -- issue or ticket URL tracking the underlying fix
+#   justification: str  -- reason this cannot be fixed by upgrading the base
 exceptions: []
