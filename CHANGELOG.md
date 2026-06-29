@@ -6,8 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- A3 approved-lock provenance validator (`scripts/verify_approved_lock.py`),
+  wired into the required Validate Catalog Schema gate. It verifies every
+  promotion entry in `catalog/approved-lock.yaml`: schema conformance, the
+  `source_digest == target_digest` provenance invariant, digest format, and a
+  catalog cross-reference of each promoted `id` and `ghcr_ref`.
+
 ### Security
 
+- Reject present-but-null required fields in the approved-lock validator so a
+  nulled `source_digest`, `target_digest`, `ghcr_ref`, `kind`, or `promoted`
+  cannot bypass the provenance checks; match digests with `re.fullmatch` so a
+  trailing-newline digest cannot pass the format gate; and constrain the YAML
+  loader's path to a regular `.yaml`/`.yml` file before opening it (SonarCloud
+  S8707).
 - Move CI secrets out of `run:` script interpolation into step-level `env:` blocks
   in the mirror workflow, so secret values are no longer expanded directly into
   shell command lines.

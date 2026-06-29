@@ -31,6 +31,7 @@ Active phases:
 | `catalog/policies.yaml` | Scanner thresholds and CVE exception policy (A2) |
 | `catalog/approved-lock.yaml` | Digest-pinned promotion lock (A3) |
 | `scripts/validate_catalog_schema.py` | Schema validator for the catalog (run before every PR) |
+| `scripts/verify_approved_lock.py` | A3 provenance validator for `catalog/approved-lock.yaml` (schema, source==target digest, catalog cross-reference) |
 | `scripts/build_matrix.py` | Builds the GitHub Actions matrix from the catalog |
 | `scripts/load_scanner_policy.py` | Translates `policies.yaml` into scanner knobs for A2 |
 | `scripts/update_approved_lock.py` | Upserts entries in `approved-lock.yaml` (A3) |
