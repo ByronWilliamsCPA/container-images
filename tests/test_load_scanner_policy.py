@@ -347,10 +347,8 @@ def test_parse_policy_invalid_yaml_raises() -> None:
 
 
 def test_resolve_today_none_returns_current_date() -> None:
-    from datetime import date as date_type
-
     result = lsp._resolve_today(None)
-    assert isinstance(result, date_type)
+    assert isinstance(result, date)
 
 
 def test_resolve_today_invalid_string_raises() -> None:
