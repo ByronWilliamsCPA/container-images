@@ -9,6 +9,11 @@ build/
 .venv/
 venv/
 
+# Coverage
+.coverage
+*.py,cover
+htmlcov/
+
 # IDE
 .vscode/
 .idea/
