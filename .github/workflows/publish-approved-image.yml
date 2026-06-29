@@ -365,7 +365,7 @@ jobs:
       - name: Note Snyk gate status
         if: env.SNYK_TOKEN == ''
         run: |
-          echo "::notice::SNYK_TOKEN is not set — Snyk container scan will be skipped for this promotion."
+          echo "::notice::SNYK_TOKEN is not set; Snyk container scan will be skipped for this promotion."
           echo "| Snyk gate | SKIPPED (SNYK_TOKEN absent) |" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Snyk gate (Critical and High block)

@@ -335,7 +335,7 @@ def test_exception_targets_invalid_scanner() -> None:
         "scanner": "unknown-tool",
         "expires": "2026-12-31",
     }
-    cve, targets, skip_msg = lsp._exception_targets(entry, "img", TODAY)
+    _, targets, skip_msg = lsp._exception_targets(entry, "img", TODAY)
     assert targets == []
     assert skip_msg is not None
     assert "invalid scanner" in skip_msg

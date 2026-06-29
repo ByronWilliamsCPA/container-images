@@ -218,7 +218,6 @@ jobs:
           echo "source=${SOURCE}" >> "${GITHUB_OUTPUT}"
           echo "target=${TARGET}" >> "${GITHUB_OUTPUT}"
           echo "digest=${TARGET_DIGEST}" >> "${GITHUB_OUTPUT}"
-          echo "source_ref=${SOURCE}@${SOURCE_DIGEST}" >> "${GITHUB_OUTPUT}"
 
           echo "| Image | \`${TARGET}\` |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Source | \`${SOURCE}@${SOURCE_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
@@ -378,7 +377,6 @@ jobs:
           echo "source=${SOURCE}" >> "${GITHUB_OUTPUT}"
           echo "target=${TARGET}" >> "${GITHUB_OUTPUT}"
           echo "digest=${TARGET_DIGEST}" >> "${GITHUB_OUTPUT}"
-          echo "source_ref=${SOURCE}@${SOURCE_DIGEST}" >> "${GITHUB_OUTPUT}"
 
           echo "| Image | \`${TARGET}\` |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Source | \`${SOURCE}@${SOURCE_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"

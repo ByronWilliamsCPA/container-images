@@ -101,19 +101,33 @@ class TestBuildInclude:
         assert row["platform"] == "linux/amd64"
         assert row["criticality"] == "low"
 
-    def test_missing_required_field_exits_with_message(self, capsys):
+    @pytest.mark.parametrize(
+        "delete_path,expected_id",
+        [
+            (("upstream", "registry"), "dhi-test"),
+            (("ghcr",), "dhi-test"),
+            (("id",), "<unknown>"),
+        ],
+        ids=["missing_upstream_registry", "missing_ghcr", "missing_id"],
+    )
+    def test_missing_required_field_exits_with_message(
+        self, delete_path, expected_id, capsys
+    ):
         """A catalog entry with a missing required field exits 1 with a clear message.
 
         validate_catalog_schema.py guards this in CI, but standalone invocations
         of build_matrix.py should get a diagnostic rather than a bare KeyError.
         """
         img = _full_image()
-        del img["upstream"]["registry"]  # simulate a structurally incomplete entry
+        target = img
+        for key in delete_path[:-1]:
+            target = target[key]
+        del target[delete_path[-1]]
         with pytest.raises(SystemExit) as exc_info:
             build_include(img)
         assert exc_info.value.code == 1
         stderr = capsys.readouterr().err
-        assert "dhi-test" in stderr
+        assert expected_id in stderr
         assert "validate_catalog_schema.py" in stderr
 
 
