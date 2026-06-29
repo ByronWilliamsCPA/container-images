@@ -99,7 +99,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install PyYAML
-        run: pip install pyyaml --quiet
+        run: pip install "pyyaml==6.0.3" --quiet
 
       - name: Validate catalog schema (exit gate)
         run: python3 scripts/validate_catalog_schema.py catalog/images.yaml
@@ -249,15 +249,16 @@ jobs:
           TARGET: ${{ steps.copy.outputs.target }}
           DIGEST: ${{ steps.copy.outputs.digest }}
         run: |
-          # Pull via digest so syft scans the exact promoted content
+          # Pull via digest so syft scans the exact promoted content.
           TARGET_WITH_DIGEST="${TARGET}@${DIGEST}"
           echo "Generating SBOM for ${TARGET_WITH_DIGEST}..."
 
-          # anchore/syft v1.44.0 as of 2026-05-02
-          # Pin to digest deferred until docker manifest inspect is available in CI
+          # #ASSUME anchore/syft:${SYFT_VERSION} resolves to the digest in SYFT_SHA256.
+          # #VERIFY when bumping SYFT_VERSION, refresh SYFT_SHA256 with
+          #   `crane digest anchore/syft:v<ver>` and update the env block.
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            anchore/syft:v1.44.0 \
+            "anchore/syft:${SYFT_VERSION}@sha256:${SYFT_SHA256}" \
             "${TARGET_WITH_DIGEST}" \
             -o cyclonedx-json > "sbom-${GHCR_NAME}.json"
 
@@ -408,11 +409,9 @@ jobs:
           DIGEST: ${{ steps.copy.outputs.digest }}
         run: |
           TARGET_WITH_DIGEST="${TARGET}@${DIGEST}"
-          # anchore/syft v1.44.0 as of 2026-05-02
-          # Pin to digest deferred until docker manifest inspect is available in CI
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            anchore/syft:v1.44.0 \
+            "anchore/syft:${SYFT_VERSION}@sha256:${SYFT_SHA256}" \
             "${TARGET_WITH_DIGEST}" \
             -o cyclonedx-json > "sbom-${GHCR_NAME}.json"
           echo "sbom_file=sbom-${GHCR_NAME}.json" >> "${GITHUB_OUTPUT}"
