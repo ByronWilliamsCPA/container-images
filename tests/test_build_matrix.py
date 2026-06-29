@@ -95,3 +95,20 @@ class TestBuildInclude:
         row = build_include(img)
         assert row["platform"] == "linux/amd64"
         assert row["criticality"] == "low"
+
+    def test_missing_required_field_exits_with_message(self, capsys):
+        """A catalog entry with a missing required field exits 1 with a clear message.
+
+        validate_catalog_schema.py guards this in CI, but standalone invocations
+        of build_matrix.py should get a diagnostic rather than a bare KeyError.
+        """
+        import pytest
+
+        img = _full_image()
+        del img["upstream"]["registry"]  # simulate a structurally incomplete entry
+        with pytest.raises(SystemExit) as exc_info:
+            build_include(img)
+        assert exc_info.value.code == 1
+        stderr = capsys.readouterr().err
+        assert "dhi-test" in stderr
+        assert "validate_catalog_schema.py" in stderr
