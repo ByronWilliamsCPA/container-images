@@ -1,10 +1,13 @@
 # =============================================================================
 # Validate Container Image Catalog Schema
 # =============================================================================
-# Runs validate_catalog_schema.py and the pytest test suite whenever
-# catalog/images.yaml or the validation scripts change. This is the A0 exit
-# gate: every catalog entry must pass schema validation before any mirror job
-# can read the matrix.
+# Runs validate_catalog_schema.py, verify_approved_lock.py, and the pytest test
+# suite whenever catalog/images.yaml, catalog/approved-lock.yaml, or the
+# validation scripts change. This is the A0/A3 exit gate: every catalog entry
+# must pass schema validation before any mirror job can read the matrix, and
+# every promoted lock entry must pass provenance verification (schema,
+# source==target digest, catalog cross-reference) before downstream consumers
+# trust it.
 # =============================================================================
 
 name: Validate Catalog Schema
@@ -14,7 +17,9 @@ on:
     branches: [main]
     paths:
       - 'catalog/images.yaml'
+      - 'catalog/approved-lock.yaml'
       - 'scripts/validate_catalog_schema.py'
+      - 'scripts/verify_approved_lock.py'
       - 'scripts/build_matrix.py'
       - 'tests/**'
       - '.github/workflows/validate-catalog-schema.yml'
@@ -72,6 +77,11 @@ jobs:
 
       - name: Validate catalog schema
         run: python3 scripts/validate_catalog_schema.py catalog/images.yaml
+
+      - name: Verify approved-lock provenance
+        run: |
+          python3 scripts/verify_approved_lock.py \
+            catalog/approved-lock.yaml catalog/images.yaml
 
       - name: Run tests (happy path + bypass-attempt cases)
         run: python3 -m pytest tests/ -v --tb=short
