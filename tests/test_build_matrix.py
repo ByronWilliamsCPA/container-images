@@ -6,10 +6,15 @@ Covers: GITHUB_OUTPUT path validation (the security-relevant guard that the
 
 from __future__ import annotations
 
+import json
 import sys
+import textwrap
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+import build_matrix  # noqa: E402
 from build_matrix import build_include, resolve_output_path  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -102,8 +107,6 @@ class TestBuildInclude:
         validate_catalog_schema.py guards this in CI, but standalone invocations
         of build_matrix.py should get a diagnostic rather than a bare KeyError.
         """
-        import pytest
-
         img = _full_image()
         del img["upstream"]["registry"]  # simulate a structurally incomplete entry
         with pytest.raises(SystemExit) as exc_info:
@@ -112,3 +115,72 @@ class TestBuildInclude:
         stderr = capsys.readouterr().err
         assert "dhi-test" in stderr
         assert "validate_catalog_schema.py" in stderr
+
+
+# ---------------------------------------------------------------------------
+# main(): file I/O, stdout fallback, and GITHUB_OUTPUT write
+# ---------------------------------------------------------------------------
+
+
+class TestMain:
+    def test_missing_catalog_exits_1(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(build_matrix, "CATALOG_PATH", tmp_path / "nope.yaml")
+        with pytest.raises(SystemExit) as exc_info:
+            build_matrix.main()
+        assert exc_info.value.code == 1
+
+    def test_empty_catalog_writes_to_stdout(self, tmp_path, monkeypatch, capsys):
+        p = tmp_path / "images.yaml"
+        p.write_text("images: []\n")
+        monkeypatch.setattr(build_matrix, "CATALOG_PATH", p)
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+        build_matrix.main()
+        out = capsys.readouterr().out
+        assert "dhi_matrix=" in out
+        assert "distroless_matrix=" in out
+        assert "dhi_count=0" in out
+        assert "distroless_count=0" in out
+
+    def test_writes_to_github_output_file(self, tmp_path, monkeypatch):
+        p = tmp_path / "images.yaml"
+        p.write_text("images: []\n")
+        monkeypatch.setattr(build_matrix, "CATALOG_PATH", p)
+        out_file = tmp_path / "gh_output"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(out_file))
+        build_matrix.main()
+        content = out_file.read_text()
+        assert "dhi_matrix=" in content
+        assert "distroless_matrix=" in content
+
+    def test_splits_primary_and_distroless(self, tmp_path, monkeypatch, capsys):
+        catalog_yaml = textwrap.dedent("""\
+            images:
+              - id: dhi-alpha
+                source_tier: primary
+                criticality: high
+                upstream: {registry: dhi.io, name: alpha, tag: "1"}
+                ghcr: {name: dhi-alpha, tag: "1"}
+                platform_compatibility: {default: linux/amd64, supported: [linux/amd64]}
+              - id: dl-base
+                source_tier: distroless
+                criticality: low
+                upstream: {registry: gcr.io, name: distroless/base, tag: latest}
+                ghcr: {name: dl-base, tag: latest}
+                platform_compatibility: {default: linux/amd64, supported: [linux/amd64]}
+        """)
+        p = tmp_path / "images.yaml"
+        p.write_text(catalog_yaml)
+        monkeypatch.setattr(build_matrix, "CATALOG_PATH", p)
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+        build_matrix.main()
+        out = capsys.readouterr().out
+        parsed = {
+            k: v
+            for line in out.splitlines()
+            if "=" in line
+            for k, v in [line.split("=", 1)]
+        }
+        assert json.loads(parsed["dhi_matrix"])["include"][0]["id"] == "dhi-alpha"
+        assert json.loads(parsed["distroless_matrix"])["include"][0]["id"] == "dl-base"
+        assert parsed["dhi_count"] == "1"
+        assert parsed["distroless_count"] == "1"
