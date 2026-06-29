@@ -300,3 +300,92 @@ def test_main_rejects_path_outside_allowed_roots(
     monkeypatch.setattr(sys, "argv", argv)
     with pytest.raises(SystemExit):
         lsp.main()
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for internal helpers not fully reached by integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_allowed_roots_includes_runner_temp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    roots = lsp._allowed_roots()
+    assert tmp_path in roots
+
+
+def test_exception_targets_blank_cve_returns_early() -> None:
+    entry = {
+        "image_id": "img",
+        "cve_id": "  ",
+        "scanner": "trivy",
+        "expires": "2026-12-31",
+    }
+    cve, targets, skip_msg = lsp._exception_targets(entry, "img", TODAY)
+    assert cve == ""
+    assert targets == []
+    assert skip_msg is None
+
+
+def test_exception_targets_invalid_scanner() -> None:
+    entry = {
+        "image_id": "img",
+        "cve_id": "CVE-2026-1",
+        "scanner": "unknown-tool",
+        "expires": "2026-12-31",
+    }
+    _, targets, skip_msg = lsp._exception_targets(entry, "img", TODAY)
+    assert targets == []
+    assert skip_msg is not None
+    assert "invalid scanner" in skip_msg
+
+
+def test_parse_policy_invalid_yaml_raises() -> None:
+    with pytest.raises(lsp._PolicyError, match="not valid YAML"):
+        lsp._parse_policy("key: [\n")
+
+
+def test_resolve_today_none_returns_current_date() -> None:
+    result = lsp._resolve_today(None)
+    assert isinstance(result, date)
+
+
+def test_resolve_today_invalid_string_raises() -> None:
+    with pytest.raises(lsp._PolicyError, match="invalid --today"):
+        lsp._resolve_today("not-a-date")
+
+
+def test_main_exceptions_not_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = _default_policy()
+    policy["exceptions"] = {"not": "a list"}
+    rc, _, _ = _run_main(tmp_path, monkeypatch, policy)
+    assert rc == 1
+
+
+def test_main_no_github_output_skips_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = _default_policy()
+    policy_path = tmp_path / "policies.yaml"
+    with policy_path.open("w") as fh:
+        yaml.safe_dump(policy, fh, sort_keys=False)
+    trivyignore = tmp_path / ".trivyignore"
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    argv = [
+        "load_scanner_policy.py",
+        "--policy-file",
+        str(policy_path),
+        "--image-id",
+        "dhi-postgres-16",
+        "--trivyignore-out",
+        str(trivyignore),
+        "--today",
+        "2026-06-28",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+    rc = lsp.main()
+    assert rc == 0
+    assert trivyignore.exists()

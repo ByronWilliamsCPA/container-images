@@ -146,3 +146,12 @@ def test_no_temp_file_left_behind(
 ) -> None:
     assert _run(monkeypatch, _argv()) == 0
     assert not (lockfile.parent / "lock.yaml.tmp").exists()
+
+
+def test_invalid_yaml_syntax_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    p = tmp_path / "lock.yaml"
+    p.write_text("key: [unclosed\n")  # flow sequence never closed → ScannerError
+    assert _run(monkeypatch, _argv()) == 1

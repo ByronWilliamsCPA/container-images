@@ -357,6 +357,16 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       # ---- Snyk (optional: skipped when SNYK_TOKEN is absent) ---------------
+      # When Snyk is absent, emit a ::notice:: annotation and a step-summary
+      # row so the omission is visible rather than silently indistinguishable
+      # from a clean Snyk run. Trivy is always required; Snyk provides a second
+      # scan layer when the token is configured.
+
+      - name: Note Snyk gate status
+        if: env.SNYK_TOKEN == ''
+        run: |
+          echo "::notice::SNYK_TOKEN is not set; Snyk container scan will be skipped for this promotion."
+          echo "| Snyk gate | SKIPPED (SNYK_TOKEN absent) |" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Snyk gate (Critical and High block)
         if: env.SNYK_TOKEN != ''

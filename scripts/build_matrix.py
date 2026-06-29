@@ -29,19 +29,28 @@ CATALOG_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("catalog/images.
 
 
 def build_include(img: dict) -> dict:
-    upstream = img["upstream"]
-    ghcr = img["ghcr"]
-    plat = img.get("platform_compatibility", {})
-    return {
-        "id": img["id"],
-        "upstream_registry": upstream["registry"],
-        "upstream_name": upstream["name"],
-        "upstream_tag": upstream["tag"],
-        "ghcr_name": ghcr["name"],
-        "ghcr_tag": ghcr["tag"],
-        "platform": plat.get("default", "linux/amd64"),
-        "criticality": img.get("criticality", "low"),
-    }
+    img_id = img.get("id", "<unknown>")
+    try:
+        upstream = img["upstream"]
+        ghcr = img["ghcr"]
+        plat = img.get("platform_compatibility", {})
+        return {
+            "id": img["id"],
+            "upstream_registry": upstream["registry"],
+            "upstream_name": upstream["name"],
+            "upstream_tag": upstream["tag"],
+            "ghcr_name": ghcr["name"],
+            "ghcr_tag": ghcr["tag"],
+            "platform": plat.get("default", "linux/amd64"),
+            "criticality": img.get("criticality", "low"),
+        }
+    except KeyError as exc:
+        print(
+            f"ERROR: [{img_id}] catalog entry is missing required field {exc}; "
+            "run validate_catalog_schema.py to diagnose",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def resolve_output_path(raw: str) -> Path | None:

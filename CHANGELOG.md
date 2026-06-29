@@ -16,6 +16,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   otherwise, to prevent writes being redirected to an unexpected location.
 - Scope the Scorecard workflow's top-level permissions to `contents: read` instead
   of `read-all`.
+- Verify the crane tarball against a pinned `CRANE_SHA256` in both mirror jobs
+  before extraction, eliminating trust in the fetched `checksums.txt` path.
+- Add `--fail` to `curl` in crane install steps so HTTP errors surface rather than
+  producing a silently corrupted download.
+- Use `--password-stdin` for all three `crane auth login` calls in the mirror
+  pipeline, keeping credentials out of process argument lists.
+- Pin `anchore/syft` by digest (`sha256:${SYFT_SHA256}`) in both mirror jobs
+  instead of a tag-only reference.
+- Pin `pyyaml==6.0.3` in the mirror `prepare` job.
+
+### Fixed
+
+- `build_matrix.py`: `build_include()` now catches `KeyError` and prints a
+  diagnostic naming the image id and missing field before exiting 1, replacing
+  a bare traceback on structurally incomplete catalog entries.
+- `publish-approved-image.yml`: emit a `::notice::` annotation and step summary
+  row when `SNYK_TOKEN` is absent so the scan skip is visible rather than silent.
+
+### Changed
+
+- Docs: update `CLAUDE.md` to reflect A2 as complete and A3 as partially complete,
+  and expand the key-files table to cover all scripts and workflows added in A2/A3.
 
 ## [0.2.0] - 2026-06-27
 

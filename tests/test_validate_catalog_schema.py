@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+import validate_catalog_schema  # noqa: E402
 from validate_catalog_schema import validate  # noqa: E402
 
 
@@ -219,3 +220,75 @@ class TestUniquenessConstraints:
         img["upstream"] = "dhi.io/test:1"
         errors = validate(minimal_catalog(img))
         assert any("mapping" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Non-dict subfields not covered by bypass tests above
+# ---------------------------------------------------------------------------
+
+
+class TestValidateNonDictSubfields:
+    def test_image_entry_not_a_mapping(self):
+        """An image list element that is not a dict reports the index."""
+        catalog = {"apiVersion": "v1", "images": ["not-a-dict"]}
+        errors = validate(catalog)
+        assert any("not a mapping" in e for e in errors)
+
+    def test_ghcr_not_a_mapping(self):
+        img = minimal_image()
+        img["ghcr"] = "ghcr.io/foo/bar:1"
+        errors = validate(minimal_catalog(img))
+        assert any("ghcr must be a mapping" in e for e in errors)
+
+    def test_platform_compatibility_not_a_mapping(self):
+        img = minimal_image()
+        img["platform_compatibility"] = "linux/amd64"
+        errors = validate(minimal_catalog(img))
+        assert any("platform_compatibility must be a mapping" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# main(): file I/O and exit-code contract
+# ---------------------------------------------------------------------------
+
+
+class TestMain:
+    def test_missing_catalog_exits_2(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            validate_catalog_schema, "CATALOG_PATH", tmp_path / "nope.yaml"
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            validate_catalog_schema.main()
+        assert exc_info.value.code == 2
+
+    def test_invalid_yaml_exits_2(self, tmp_path, monkeypatch):
+        p = tmp_path / "bad.yaml"
+        p.write_text("key: [\n")  # unclosed flow sequence → ScannerError
+        monkeypatch.setattr(validate_catalog_schema, "CATALOG_PATH", p)
+        with pytest.raises(SystemExit) as exc_info:
+            validate_catalog_schema.main()
+        assert exc_info.value.code == 2
+
+    def test_non_mapping_yaml_exits_2(self, tmp_path, monkeypatch):
+        p = tmp_path / "list.yaml"
+        p.write_text("- a\n- b\n")
+        monkeypatch.setattr(validate_catalog_schema, "CATALOG_PATH", p)
+        with pytest.raises(SystemExit) as exc_info:
+            validate_catalog_schema.main()
+        assert exc_info.value.code == 2
+
+    def test_valid_catalog_prints_pass(self, tmp_path, monkeypatch, capsys):
+        p = tmp_path / "valid.yaml"
+        p.write_text("apiVersion: v1\nimages: []\n")
+        monkeypatch.setattr(validate_catalog_schema, "CATALOG_PATH", p)
+        validate_catalog_schema.main()  # must not raise
+        assert "PASS" in capsys.readouterr().out
+
+    def test_invalid_catalog_exits_1_with_fail(self, tmp_path, monkeypatch, capsys):
+        p = tmp_path / "invalid.yaml"
+        p.write_text("images: []\n")  # missing apiVersion
+        monkeypatch.setattr(validate_catalog_schema, "CATALOG_PATH", p)
+        with pytest.raises(SystemExit) as exc_info:
+            validate_catalog_schema.main()
+        assert exc_info.value.code == 1
+        assert "FAIL" in capsys.readouterr().out

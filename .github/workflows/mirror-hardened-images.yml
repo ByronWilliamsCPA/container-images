@@ -47,6 +47,18 @@ concurrency:
 
 env:
   CRANE_VERSION: "0.20.2"
+  # In-repo checksum provides an independent trust anchor: even if the GitHub
+  # release server is compromised, a modified binary will not match this value.
+  # #ASSUME the crane release asset name and this sha256 stay valid for this
+  # pinned version; GitHub release assets are immutable once published.
+  # #VERIFY when bumping CRANE_VERSION, refresh CRANE_SHA256 from the release
+  #   checksums.txt: `curl -sL .../v<ver>/checksums.txt | grep Linux_x86_64`.
+  CRANE_SHA256: "c14340087103ba9dadf61d45acd20675490fd0ccbd56ac7901fc1b502137f44b"  # pragma: allowlist secret
+  SYFT_VERSION: "v1.44.0"
+  # #ASSUME anchore/syft:v1.44.0 resolves to the digest pinned below.
+  # #VERIFY when bumping SYFT_VERSION, refresh SYFT_SHA256 with
+  #   `crane digest anchore/syft:v<ver>` and update this value.
+  SYFT_SHA256: "86fde6445b483d902fe011dd9f68c4987dd94e07da1e9edc004e3c2422650de6"
 
 permissions:
   contents: read
@@ -87,7 +99,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install PyYAML
-        run: pip install pyyaml --quiet
+        run: pip install "pyyaml==6.0.3" --quiet
 
       - name: Validate catalog schema (exit gate)
         run: python3 scripts/validate_catalog_schema.py catalog/images.yaml
@@ -130,15 +142,17 @@ jobs:
 
       - name: Install crane (verify checksum before extraction)
         run: |
-          curl -sL \
-            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
-            -o go-containerregistry_Linux_x86_64.tar.gz
-          curl -sL \
-            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
-            -o checksums.txt
-          grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
-          tar xz -C /usr/local/bin crane < go-containerregistry_Linux_x86_64.tar.gz
-          rm go-containerregistry_Linux_x86_64.tar.gz checksums.txt
+          CRANE_BASE="https://github.com/google/go-containerregistry/releases/download"
+          CRANE_ASSET="go-containerregistry_Linux_x86_64.tar.gz"
+          # --fail makes curl exit non-zero on HTTP 4xx/5xx instead of silently
+          # writing the error body into the archive.
+          curl --fail --show-error --silent --location \
+            "${CRANE_BASE}/v${CRANE_VERSION}/${CRANE_ASSET}" -o crane.tar.gz
+          # Verify against the sha256 pinned in this repo (independent trust
+          # anchor) BEFORE extracting or executing the downloaded binary.
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum --check
+          tar xz -C /usr/local/bin crane < crane.tar.gz
+          rm crane.tar.gz
           crane version
 
       - name: Mask registry credentials
@@ -158,8 +172,12 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          crane auth login dhi.io --username "${DHI_USER}" --password "${DHI_PASS}"
-          crane auth login ghcr.io --username "${GHCR_USER}" --password "${GHCR_PASS}"
+          # --password-stdin keeps the token out of the process argument list
+          # (visible in /proc); matches the pattern in publish-approved-image.yml.
+          printf '%s' "${DHI_PASS}" | \
+            crane auth login dhi.io --username "${DHI_USER}" --password-stdin
+          printf '%s' "${GHCR_PASS}" | \
+            crane auth login ghcr.io --username "${GHCR_USER}" --password-stdin
 
       # A1: resolve exact upstream digest, copy content-addressed, assert equality
       - name: Resolve upstream digest and copy to GHCR
@@ -200,7 +218,6 @@ jobs:
           echo "source=${SOURCE}" >> "${GITHUB_OUTPUT}"
           echo "target=${TARGET}" >> "${GITHUB_OUTPUT}"
           echo "digest=${TARGET_DIGEST}" >> "${GITHUB_OUTPUT}"
-          echo "source_ref=${SOURCE}@${SOURCE_DIGEST}" >> "${GITHUB_OUTPUT}"
 
           echo "| Image | \`${TARGET}\` |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Source | \`${SOURCE}@${SOURCE_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
@@ -231,15 +248,16 @@ jobs:
           TARGET: ${{ steps.copy.outputs.target }}
           DIGEST: ${{ steps.copy.outputs.digest }}
         run: |
-          # Pull via digest so syft scans the exact promoted content
+          # Pull via digest so syft scans the exact promoted content.
           TARGET_WITH_DIGEST="${TARGET}@${DIGEST}"
           echo "Generating SBOM for ${TARGET_WITH_DIGEST}..."
 
-          # anchore/syft v1.44.0 as of 2026-05-02
-          # Pin to digest deferred until docker manifest inspect is available in CI
+          # #ASSUME anchore/syft:${SYFT_VERSION} resolves to the digest in SYFT_SHA256.
+          # #VERIFY when bumping SYFT_VERSION, refresh SYFT_SHA256 with
+          #   `crane digest anchore/syft:v<ver>` and update the env block.
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            anchore/syft:v1.44.0 \
+            "anchore/syft:${SYFT_VERSION}@sha256:${SYFT_SHA256}" \
             "${TARGET_WITH_DIGEST}" \
             -o cyclonedx-json > "sbom-${GHCR_NAME}.json"
 
@@ -302,15 +320,13 @@ jobs:
 
       - name: Install crane (verify checksum before extraction)
         run: |
-          curl -sL \
-            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
-            -o go-containerregistry_Linux_x86_64.tar.gz
-          curl -sL \
-            "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/checksums.txt" \
-            -o checksums.txt
-          grep "go-containerregistry_Linux_x86_64.tar.gz" checksums.txt | sha256sum --check
-          tar xz -C /usr/local/bin crane < go-containerregistry_Linux_x86_64.tar.gz
-          rm go-containerregistry_Linux_x86_64.tar.gz checksums.txt
+          CRANE_BASE="https://github.com/google/go-containerregistry/releases/download"
+          CRANE_ASSET="go-containerregistry_Linux_x86_64.tar.gz"
+          curl --fail --show-error --silent --location \
+            "${CRANE_BASE}/v${CRANE_VERSION}/${CRANE_ASSET}" -o crane.tar.gz
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum --check
+          tar xz -C /usr/local/bin crane < crane.tar.gz
+          rm crane.tar.gz
           crane version
 
       - name: Mask GitHub token
@@ -322,7 +338,9 @@ jobs:
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
-        run: crane auth login ghcr.io --username "${GHCR_USER}" --password "${GHCR_PASS}"
+        run: |
+          printf '%s' "${GHCR_PASS}" | \
+            crane auth login ghcr.io --username "${GHCR_USER}" --password-stdin
 
       - name: Resolve upstream digest and copy to GHCR
         id: copy
@@ -390,11 +408,9 @@ jobs:
           DIGEST: ${{ steps.copy.outputs.digest }}
         run: |
           TARGET_WITH_DIGEST="${TARGET}@${DIGEST}"
-          # anchore/syft v1.44.0 as of 2026-05-02
-          # Pin to digest deferred until docker manifest inspect is available in CI
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            anchore/syft:v1.44.0 \
+            "anchore/syft:${SYFT_VERSION}@sha256:${SYFT_SHA256}" \
             "${TARGET_WITH_DIGEST}" \
             -o cyclonedx-json > "sbom-${GHCR_NAME}.json"
           echo "sbom_file=sbom-${GHCR_NAME}.json" >> "${GITHUB_OUTPUT}"
