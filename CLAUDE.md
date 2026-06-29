@@ -17,18 +17,29 @@ they do not hardcode image names.
 Active phases:
 - A0 (catalog schema and matrix builder): complete
 - A1 (crane digest-copy mirror pipeline): complete
-- A2 (scanner policies): planned
-- A3 (promotion lock): planned
+- A2 (scanner policies): complete
+- A3 (promotion lock): partially complete — lock file schema, update script
+  (`scripts/update_approved_lock.py`), and `update-lock` job in
+  `publish-approved-image.yml` are all implemented; bot commit GPG signing is
+  deferred pending a dedicated signing key in repo secrets
 
 ## Key files
 
 | File | Role |
 | --- | --- |
 | `catalog/images.yaml` | Image catalog: the authoritative list of images to mirror |
+| `catalog/policies.yaml` | Scanner thresholds and CVE exception policy (A2) |
+| `catalog/approved-lock.yaml` | Digest-pinned promotion lock (A3) |
 | `scripts/validate_catalog_schema.py` | Schema validator for the catalog (run before every PR) |
 | `scripts/build_matrix.py` | Builds the GitHub Actions matrix from the catalog |
-| `.github/workflows/mirror-hardened-images.yml` | Mirror pipeline: pulls source, copies via crane, signs, attests SBOM |
-| `.github/workflows/validate-catalog-schema.yml` | CI job that runs the schema validator on every push |
+| `scripts/load_scanner_policy.py` | Translates `policies.yaml` into scanner knobs for A2 |
+| `scripts/update_approved_lock.py` | Upserts entries in `approved-lock.yaml` (A3) |
+| `.github/workflows/mirror-hardened-images.yml` | A1 mirror pipeline: crane digest-copy, Trivy scan, Cosign sign, SBOM attest |
+| `.github/workflows/validate-catalog-schema.yml` | A0 exit gate: schema validator + pytest on every push and PR |
+| `.github/workflows/publish-approved-image.yml` | A2 reusable promotion workflow: full scanner policy pipeline |
+| `.github/workflows/pr-validation.yml` | Ruff + pytest + pip-audit required PR check |
+| `.github/workflows/security-analysis.yml` | Bandit + yamllint required security gate |
+| `.github/workflows/codeql.yml` | CodeQL SAST (Python), weekly and on PR |
 
 The Python scripts are glue code only. Keep them small and focused; they are not
 application logic.
@@ -51,6 +62,10 @@ Changes to `.github/workflows/mirror-hardened-images.yml` must preserve:
 - crane digest-copy (not docker pull/push) for reproducible digests
 - Cosign signing step
 - SBOM attestation step
+
+Changes to `.github/workflows/publish-approved-image.yml` (A2) must also preserve:
+- the `load_scanner_policy.py` step (policy-driven Snyk/Trivy thresholds)
+- the `update-lock` job writing to `catalog/approved-lock.yaml` (A3)
 
 Test pipeline changes with a draft PR and inspect the Actions run before merging.
 
