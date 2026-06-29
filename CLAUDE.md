@@ -26,6 +26,7 @@ Active phases:
 | --- | --- |
 | `catalog/images.yaml` | Image catalog: the authoritative list of images to mirror |
 | `scripts/validate_catalog_schema.py` | Schema validator for the catalog (run before every PR) |
+| `scripts/verify_approved_lock.py` | A3 provenance validator for `catalog/approved-lock.yaml` (schema, source==target digest, catalog cross-reference) |
 | `scripts/build_matrix.py` | Builds the GitHub Actions matrix from the catalog |
 | `.github/workflows/mirror-hardened-images.yml` | Mirror pipeline: pulls source, copies via crane, signs, attests SBOM |
 | `.github/workflows/validate-catalog-schema.yml` | CI job that runs the schema validator on every push |

@@ -217,6 +217,99 @@ class TestUniquenessAndBypass:
 
 
 # ---------------------------------------------------------------------------
+# Present-but-null bypass: a nulled field must count as missing, never skip a
+# value-level check. In YAML, `field:` is a present key with a None value.
+# ---------------------------------------------------------------------------
+
+
+class TestNullFieldBypass:
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "id",
+            "ghcr_ref",
+            "source_digest",
+            "target_digest",
+            "promoted_at",
+            "promoted_by",
+        ],
+    )
+    def test_null_entry_field_rejected(self, field: str):
+        entry = minimal_entry(**{field: None})
+        errors = validate(minimal_lock(entry), CATALOG)
+        assert any(field in e for e in errors), (
+            f"Expected a null {field!r} to be rejected, got: {errors}"
+        )
+
+    def test_all_provenance_fields_null_rejected(self):
+        """A lock entry asserting no provenance at all must fail (the core hole)."""
+        entry = minimal_entry(ghcr_ref=None, source_digest=None, target_digest=None)
+        assert validate(minimal_lock(entry), CATALOG)
+
+    def test_null_target_digest_rejected(self):
+        """source present + target null: provenance is unverifiable, must fail."""
+        entry = minimal_entry(target_digest=None)
+        assert validate(minimal_lock(entry), CATALOG)
+
+    @pytest.mark.parametrize("field", ["apiVersion", "kind", "promoted"])
+    def test_null_top_level_field_rejected(self, field: str):
+        lock = minimal_lock(minimal_entry())
+        lock[field] = None
+        assert any(field in e for e in validate(lock, CATALOG))
+
+
+# ---------------------------------------------------------------------------
+# Digest format edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestDigestFormatEdges:
+    def test_trailing_newline_digest_rejected(self):
+        r"""`sha256:<64hex>\n` must fail: the old `$` anchor would have allowed it."""
+        bad = "sha256:" + "a" * 64 + "\n"
+        entry = minimal_entry(source_digest=bad, target_digest=bad)
+        errors = validate(minimal_lock(entry), CATALOG)
+        assert any("source_digest" in e for e in errors)
+
+    def test_malformed_target_digest_rejected(self):
+        """The target arm of the format check is exercised independently."""
+        entry = minimal_entry(target_digest="sha256:" + "z" * 64)
+        errors = validate(minimal_lock(entry), CATALOG)
+        assert any("target_digest" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Field typing, error accumulation, and malformed catalog
+# ---------------------------------------------------------------------------
+
+
+class TestFieldTypesAndAccumulation:
+    @pytest.mark.parametrize("field", ["id", "ghcr_ref", "promoted_at", "promoted_by"])
+    def test_non_string_field_rejected(self, field: str):
+        entry = minimal_entry(**{field: 12345})
+        errors = validate(minimal_lock(entry), CATALOG)
+        assert any(field in e for e in errors)
+
+    def test_multiple_errors_accumulate(self):
+        """One entry with several defects reports several errors, not just one."""
+        entry = minimal_entry(id="dhi-untrusted", target_digest=DIGEST_B)
+        del entry["promoted_by"]
+        errors = validate(minimal_lock(entry), CATALOG)
+        assert len(errors) >= 3, f"Expected >= 3 accumulated errors, got: {errors}"
+
+
+class TestMalformedCatalog:
+    def test_non_list_images_surfaces_catalog_error(self):
+        bad_catalog = {"apiVersion": "v1", "images": "not-a-list"}
+        errors = validate(minimal_lock(minimal_entry()), bad_catalog)
+        assert any("images" in e for e in errors)
+
+    def test_missing_images_key_surfaces_catalog_error(self):
+        errors = validate(minimal_lock(minimal_entry()), {"apiVersion": "v1"})
+        assert any("images" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
 # main() entry point and exit codes
 # ---------------------------------------------------------------------------
 
@@ -260,3 +353,26 @@ class TestMainExitCodes:
         lock_p = tmp_path / "approved-lock.yaml"
         self._write(lock_p, minimal_lock())
         assert self._run_main(monkeypatch, lock_p, tmp_path / "nope.yaml") == 2
+
+    def test_main_malformed_yaml_exit_2(self, tmp_path, monkeypatch):
+        lock_p = tmp_path / "approved-lock.yaml"
+        cat_p = tmp_path / "images.yaml"
+        lock_p.write_text("apiVersion: v1\nkind: [unclosed\n")
+        self._write(cat_p, CATALOG)
+        assert self._run_main(monkeypatch, lock_p, cat_p) == 2
+
+    def test_main_non_dict_top_level_exit_2(self, tmp_path, monkeypatch):
+        lock_p = tmp_path / "approved-lock.yaml"
+        cat_p = tmp_path / "images.yaml"
+        lock_p.write_text("- just\n- a\n- list\n")
+        self._write(cat_p, CATALOG)
+        assert self._run_main(monkeypatch, lock_p, cat_p) == 2
+
+    def test_main_directory_path_exit_2(self, tmp_path, monkeypatch):
+        # A directory at the path is not a regular file: documented exit 2,
+        # not an uncaught OSError traceback.
+        cat_p = tmp_path / "images.yaml"
+        self._write(cat_p, CATALOG)
+        a_dir = tmp_path / "lock.yaml"
+        a_dir.mkdir()
+        assert self._run_main(monkeypatch, a_dir, cat_p) == 2

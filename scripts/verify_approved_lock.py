@@ -48,6 +48,10 @@ except ImportError:
 DEFAULT_LOCK_PATH = Path("catalog/approved-lock.yaml")
 DEFAULT_CATALOG_PATH = Path("catalog/images.yaml")
 
+# #ASSUME GHCR_NAMESPACE and the ref-derivation in build_catalog_refs match
+# validate_catalog_schema.py's literal; the two scripts must change in lockstep
+# or the catalog cross-reference silently mismatches every promoted entry.
+# #VERIFY grep both scripts for "ghcr.io/byronwilliamscpa" when renaming the org.
 GHCR_NAMESPACE = "ghcr.io/byronwilliamscpa"
 EXPECTED_KIND = "ApprovedImageLock"
 
@@ -61,7 +65,12 @@ REQUIRED_ENTRY_FIELDS = {
     "promoted_by",
 }
 # Docker/OCI content digests: sha256 plus exactly 64 lowercase hex characters.
-DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+# Unanchored and matched with re.fullmatch (below) so a trailing newline cannot
+# slip through: the `$` anchor matches just before a final '\n', which would let
+# "sha256:<64hex>\n" pass the format gate.
+# #ASSUME only sha256 digests are emitted; crane/cosign resolve sha256 today.
+# #VERIFY extend the alternation if the publish pipeline adopts sha512.
+DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 def error(msg: str, entry_id: str = "") -> str:
@@ -93,9 +102,14 @@ def build_catalog_refs(catalog: dict[str, Any]) -> dict[str, str]:
 
 def _validate_top_level(lock: dict[str, Any]) -> list[str]:
     """Report missing required top-level fields and a wrong ``kind`` value."""
+    # Treat a present-but-null field (YAML `field:` with no value) the same as a
+    # missing one. Otherwise the key-membership check passes while the value-level
+    # checks below skip on None, letting a nulled apiVersion/kind/promoted bypass
+    # the gate.
     errors = [
         error(f"missing required top-level field: {field!r}")
-        for field in sorted(REQUIRED_TOP_LEVEL - set(lock.keys()))
+        for field in sorted(REQUIRED_TOP_LEVEL)
+        if lock.get(field) is None
     ]
     kind = lock.get("kind")
     if kind is not None and kind != EXPECTED_KIND:
@@ -111,7 +125,7 @@ def _validate_digests(entry: dict[str, Any], entry_id: str) -> list[str]:
 
     for field, value in (("source_digest", source), ("target_digest", target)):
         if value is not None and not (
-            isinstance(value, str) and DIGEST_RE.match(value)
+            isinstance(value, str) and DIGEST_RE.fullmatch(value)
         ):
             errors.append(
                 error(
@@ -158,6 +172,27 @@ def _validate_catalog_link(
     return []
 
 
+# Required fields that must be plain strings. Digests are excluded here because
+# _validate_digests format-checks them; the rest get a type check so the "well
+# typed" schema promise holds for the audit-trail fields too.
+STRING_FIELDS = ("id", "ghcr_ref", "promoted_at", "promoted_by")
+
+
+def _validate_field_types(entry: dict[str, Any], entry_id: str) -> list[str]:
+    """Reject required string fields that are present but not strings."""
+    errors: list[str] = []
+    for field in STRING_FIELDS:
+        value = entry.get(field)
+        if value is not None and not isinstance(value, str):
+            errors.append(
+                error(
+                    f"{field} must be a string, got {type(value).__name__}",
+                    entry_id,
+                )
+            )
+    return errors
+
+
 def _validate_entry(
     entry: Any,
     index: int,
@@ -170,9 +205,13 @@ def _validate_entry(
 
     entry_id = entry.get("id", f"<index:{index}>")
 
+    # A present-but-null field counts as missing (see _validate_top_level): the
+    # value-level checks below skip on None, so without this a nulled
+    # source_digest/target_digest/ghcr_ref would bypass the provenance gate.
     errors = [
-        error(f"missing required field: {field!r}", entry_id)
-        for field in sorted(REQUIRED_ENTRY_FIELDS - set(entry.keys()))
+        error(f"missing or null required field: {field!r}", entry_id)
+        for field in sorted(REQUIRED_ENTRY_FIELDS)
+        if entry.get(field) is None
     ]
 
     if str(entry_id) in seen_ids:
@@ -180,8 +219,9 @@ def _validate_entry(
     else:
         seen_ids.add(str(entry_id))
 
+    errors.extend(_validate_field_types(entry, str(entry_id)))
     errors.extend(_validate_digests(entry, str(entry_id)))
-    if "id" in entry:
+    if entry.get("id") is not None:
         errors.extend(_validate_catalog_link(entry, str(entry_id), catalog_refs))
     return errors
 
@@ -197,6 +237,18 @@ def validate(lock: dict[str, Any], catalog: dict[str, Any]) -> list[str]:
         errors.append(error("'promoted' must be a list"))
         return errors
 
+    # Surface a structurally broken catalog explicitly. Without this, a non-list
+    # `images` yields an empty ref map and every entry fails with a misleading
+    # "id not present in catalog" instead of pointing at the real cause.
+    images = catalog.get("images")
+    if not isinstance(images, list):
+        errors.append(
+            error(
+                "catalog 'images' is missing or not a list; "
+                "cannot verify lock entries against it"
+            )
+        )
+
     catalog_refs = build_catalog_refs(catalog)
     seen_ids: set[str] = set()
     for i, entry in enumerate(promoted):
@@ -205,15 +257,22 @@ def validate(lock: dict[str, Any], catalog: dict[str, Any]) -> list[str]:
 
 
 def _load_yaml_mapping(path: Path, label: str) -> dict[str, Any]:
-    """Load a YAML file that must exist and parse to a top-level mapping."""
-    if not path.exists():
-        print(f"ERROR: {label} not found: {path}", file=sys.stderr)
+    """Load a YAML file that must exist and parse to a top-level mapping.
+
+    The path is resolved and confirmed to be a regular ``.yaml``/``.yml`` file
+    immediately before it is opened, co-locating the validation barrier with the
+    filesystem sink so a faulty CLI argument cannot reach ``open()`` unvalidated
+    (SonarCloud S8707).
+    """
+    resolved = path.resolve()
+    if resolved.suffix not in {".yaml", ".yml"} or not resolved.is_file():
+        print(f"ERROR: {label} not found or not a YAML file: {path}", file=sys.stderr)
         sys.exit(2)
     try:
-        with path.open() as fh:
+        with resolved.open() as fh:
             data = yaml.safe_load(fh)
-    except yaml.YAMLError as exc:
-        print(f"ERROR: YAML parse error in {path}:\n  {exc}", file=sys.stderr)
+    except (OSError, yaml.YAMLError) as exc:
+        print(f"ERROR: cannot read or parse {path}:\n  {exc}", file=sys.stderr)
         sys.exit(2)
     if not isinstance(data, dict):
         print(f"ERROR: {path} must be a YAML mapping at the top level", file=sys.stderr)
