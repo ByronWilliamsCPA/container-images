@@ -106,26 +106,26 @@ rectangle "Job: promote\n(runs-on: ubuntu-latest  |  timeout: 30m  |  environmen
   rectangle "[6] crane copy by digest -> ghcr.io\nassert source_digest == target_digest\nWARNS if upstream is multi-arch index\n(only single platform promoted)" as step_copy <<blocking>> #FFCDD2
 
   ' ---- gate 5: snyk ----------------------------------------------------------
-  rectangle "[5a] Snyk gate status notice\n(::notice:: + step summary row)" as step_snyk_skip <<optional>> #F1F8E9
-  rectangle "[5b] Snyk CRITICAL/HIGH gate\n(threshold from policy; --severity-threshold)\nSARIF -> Security tab" as step_snyk_block <<blocking>> #FFCDD2
-  rectangle "[5c] Snyk medium warning\n(continue-on-error: true)\nEmits ::warning:: only; never blocks" as step_snyk_warn <<warn>> #FFF9C4
-  rectangle "[5d] Upload Snyk SARIF\n(only if snyk-high.sarif exists)" as step_snyk_sarif <<optional>> #F1F8E9
+  rectangle "[7a] Snyk gate status notice\n(::notice:: + step summary row)" as step_snyk_skip <<optional>> #F1F8E9
+  rectangle "[7b] Snyk CRITICAL/HIGH gate\n(threshold from policy; --severity-threshold)\nSARIF -> Security tab" as step_snyk_block <<blocking>> #FFCDD2
+  rectangle "[7c] Snyk medium warning\n(continue-on-error: true)\nEmits ::warning:: only; never blocks" as step_snyk_warn <<warn>> #FFF9C4
+  rectangle "[7d] Upload Snyk SARIF\n(only if snyk-high.sarif exists)" as step_snyk_sarif <<optional>> #F1F8E9
 
   ' ---- gate 6: trivy ---------------------------------------------------------
-  rectangle "[7] Trivy CRITICAL/HIGH gate\n(exit-code: 1  --  always required)\nSeverities + .trivyignore from policy\nSARIF -> Security tab" as step_trivy <<blocking>> #FFCDD2
+  rectangle "[8] Trivy CRITICAL/HIGH gate\n(exit-code: 1  --  always required)\nSeverities + .trivyignore from policy\nSARIF -> Security tab" as step_trivy <<blocking>> #FFCDD2
 
   ' ---- SBOM ------------------------------------------------------------------
-  rectangle "[8a] Syft: Generate CycloneDX SBOM\n(anchore/syft@digest pin)" as step_cdx <<output>> #E0F7FA
-  rectangle "[8b] Syft: Generate SPDX SBOM\n(anchore/syft@digest pin)" as step_spdx <<output>> #E0F7FA
-  rectangle "[8c] Upload SBOM artifacts\n(retention: 90 days)" as step_sbom_up <<output>> #E0F7FA
+  rectangle "[9a] Syft: Generate CycloneDX SBOM\n(anchore/syft@digest pin)" as step_cdx <<output>> #E0F7FA
+  rectangle "[9b] Syft: Generate SPDX SBOM\n(anchore/syft@digest pin)" as step_spdx <<output>> #E0F7FA
+  rectangle "[9c] Upload SBOM artifacts\n(retention: 90 days)" as step_sbom_up <<output>> #E0F7FA
 
   ' ---- signing (main only) ---------------------------------------------------
-  rectangle "[9a] cosign sign (keyless OIDC)" as step_sign <<main_only>> #E8EAF6
-  rectangle "[9b] cosign attest CycloneDX SBOM" as step_attest <<main_only>> #E8EAF6
-  rectangle "[9c] GitHub build-provenance attestation\n(actions/attest-build-provenance)" as step_prov <<main_only>> #E8EAF6
+  rectangle "[10a] cosign sign (keyless OIDC)" as step_sign <<main_only>> #E8EAF6
+  rectangle "[10b] cosign attest CycloneDX SBOM" as step_attest <<main_only>> #E8EAF6
+  rectangle "[10c] GitHub build-provenance attestation\n(actions/attest-build-provenance)" as step_prov <<main_only>> #E8EAF6
 
   ' ---- outputs ---------------------------------------------------------------
-  rectangle "[10] Set job outputs\n(promoted=true, target_ref,\nsource_digest, target_digest)" as step_outputs <<output>> #E0F7FA
+  rectangle "[11] Set job outputs\n(promoted=true, target_ref,\nsource_digest, target_digest)" as step_outputs <<output>> #E0F7FA
 }
 
 ' =============================================================================
