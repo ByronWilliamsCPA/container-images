@@ -594,7 +594,9 @@ images:
     upstream:
       registry: gcr.io
       name: distroless/python3-debian12
+      # 'latest' is a human-readable hint; the digest is the real pin (RT-6).
       tag: "latest"
+      digest: "sha256:2fdb05402a2cf21cf78fdb3ba4c5db167241e9e498140f5bf689d7efb773731f"
     ghcr:
       name: distroless-python3
       tag: "latest"
@@ -614,7 +616,9 @@ images:
     upstream:
       registry: gcr.io
       name: distroless/nodejs20-debian12
+      # 'latest' is a human-readable hint; the digest is the real pin (RT-6).
       tag: "latest"
+      digest: "sha256:6fe218dbad37e979c7542e670d28d6e23d3f53d2929693bc9cdded8b622f339f"
     ghcr:
       name: distroless-nodejs20
       tag: "latest"
@@ -633,7 +637,9 @@ images:
     upstream:
       registry: gcr.io
       name: distroless/static-debian12
+      # 'latest' is a human-readable hint; the digest is the real pin (RT-6).
       tag: "latest"
+      digest: "sha256:9c346e4be81b5ca7ff31a0d89eaeade58b0f95cfd3baed1f36083ddb47ca3160"
     ghcr:
       name: distroless-static
       tag: "latest"
