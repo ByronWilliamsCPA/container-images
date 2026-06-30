@@ -16,6 +16,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- Stop minting cosign signatures and SBOM attestations in the live mirror until
+  upstream-identity verification exists (RT-1 interim, ADR-012). A
+  `MIRROR_SIGNING_ENABLED` kill-switch (default `false`) gates all four Sign/Attest
+  steps in `mirror-hardened-images.yml`, while `crane copy`, digest-equality assert,
+  Trivy scan, and SBOM generation still run. Signing previously minted this org's
+  keyless identity over unverified upstream bytes (trust laundering); disabling it
+  removes false trust, not a working dependency. Re-enable once the shared
+  `mirror-verify` workflow gates this job.
 - Reject present-but-null required fields in the approved-lock validator so a
   nulled `source_digest`, `target_digest`, `ghcr_ref`, `kind`, or `promoted`
   cannot bypass the provenance checks; match digests with `re.fullmatch` so a
