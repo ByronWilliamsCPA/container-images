@@ -58,7 +58,16 @@ env:
   # #ASSUME anchore/syft:v1.44.0 resolves to the digest pinned below.
   # #VERIFY when bumping SYFT_VERSION, refresh SYFT_SHA256 with
   #   `crane digest anchore/syft:v<ver>` and update this value.
-  SYFT_SHA256: "86fde6445b483d902fe011dd9f68c4987dd94e07da1e9edc004e3c2422650de6"
+  SYFT_SHA256: "86fde6445b483d902fe011dd9f68c4987dd94e07da1e9edc004e3c2422650de6"  # pragma: allowlist secret
+
+  # RT-1 interim kill-switch (ADR-012, homelab-infra): this live mirror copies a
+  # MUTABLE upstream tag, so signing/attesting here mints this org's keyless
+  # identity over bytes whose upstream signer was never verified (trust
+  # laundering). Signing stays OFF until the shared `mirror-verify` reusable
+  # workflow performs a fail-closed upstream-identity verification before
+  # promotion. Flip to "true" only once that verification gates this job.
+  # Copy + Trivy scan + SBOM generation still run while this is "false".
+  MIRROR_SIGNING_ENABLED: "false"
 
 permissions:
   contents: read
@@ -266,7 +275,7 @@ jobs:
           echo "sbom_file=sbom-${GHCR_NAME}.json" >> "${GITHUB_OUTPUT}"
 
       - name: Sign image with Cosign
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && env.MIRROR_SIGNING_ENABLED == 'true'
         env:
           TARGET: ${{ steps.copy.outputs.target }}
           DIGEST: ${{ steps.copy.outputs.digest }}
@@ -275,7 +284,7 @@ jobs:
           echo "Signed: ${TARGET}@${DIGEST}"
 
       - name: Attest SBOM
-        if: github.ref == 'refs/heads/main' && steps.sbom.outputs.sbom_file != ''
+        if: github.ref == 'refs/heads/main' && steps.sbom.outputs.sbom_file != '' && env.MIRROR_SIGNING_ENABLED == 'true'
         env:
           TARGET: ${{ steps.copy.outputs.target }}
           DIGEST: ${{ steps.copy.outputs.digest }}
@@ -416,14 +425,14 @@ jobs:
           echo "sbom_file=sbom-${GHCR_NAME}.json" >> "${GITHUB_OUTPUT}"
 
       - name: Sign image with Cosign
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && env.MIRROR_SIGNING_ENABLED == 'true'
         env:
           TARGET: ${{ steps.copy.outputs.target }}
           DIGEST: ${{ steps.copy.outputs.digest }}
         run: cosign sign --yes "${TARGET}@${DIGEST}"
 
       - name: Attest SBOM
-        if: github.ref == 'refs/heads/main' && steps.sbom.outputs.sbom_file != ''
+        if: github.ref == 'refs/heads/main' && steps.sbom.outputs.sbom_file != '' && env.MIRROR_SIGNING_ENABLED == 'true'
         env:
           TARGET: ${{ steps.copy.outputs.target }}
           DIGEST: ${{ steps.copy.outputs.digest }}

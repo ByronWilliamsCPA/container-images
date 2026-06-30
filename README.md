@@ -79,8 +79,15 @@ repository. Manual trigger is available via GitHub Actions workflow dispatch.
 Every DHI image in this mirror carries:
 
 - SLSA Level 3 provenance (from DHI upstream)
-- CycloneDX SBOM attestation via cosign keyless signing
 - AMD64; ARM64 planned
+
+> **Mirror signing is temporarily disabled (RT-1 interim, ADR-012).** This mirror
+> copies a mutable upstream tag, so signing and attesting here would mint this org's
+> keyless identity over bytes whose upstream signer was never verified. CycloneDX
+> SBOM attestation and cosign keyless signing are therefore OFF
+> (`MIRROR_SIGNING_ENABLED=false`) until the shared `mirror-verify` workflow performs
+> fail-closed upstream-identity verification. Images mirrored during this window are
+> unsigned.
 
 ## Requesting a new image
 
