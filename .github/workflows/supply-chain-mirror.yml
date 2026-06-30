@@ -53,7 +53,7 @@ permissions:
 jobs:
   verify:
     name: Verify upstream (dhi-postgres-17)
-    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-mirror-verify.yml@bec4d9f5baab87860dc2b3806b4c21745afab765
+    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-mirror-verify.yml@5825ec597cb87f66efcc471f7f2d9fd47e5dcf14
     with:
       upstream_registry: dhi.io
       upstream_name: postgres
@@ -69,7 +69,7 @@ jobs:
   promote:
     name: Promote to GHCR (scan -> publish -> sign -> lock)
     needs: verify
-    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-promote-core.yml@bec4d9f5baab87860dc2b3806b4c21745afab765
+    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-promote-core.yml@5825ec597cb87f66efcc471f7f2d9fd47e5dcf14
     with:
       image_id: dhi-postgres-17
       source_kind: registry
@@ -83,3 +83,7 @@ jobs:
       sign: true
     secrets:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      # dhi.io is authenticated: the scan job's crane pull needs these to fetch
+      # the bytes mirror-verify only resolved (org .github #237).
+      UPSTREAM_REGISTRY_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
+      UPSTREAM_REGISTRY_TOKEN: ${{ secrets.DHI_REGISTRY_TOKEN }}
