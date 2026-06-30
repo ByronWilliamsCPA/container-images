@@ -33,8 +33,11 @@ name: Supply Chain Mirror (bake)
 on:
   workflow_dispatch:
 
-# The called reusable workflows declare their own per-job permissions; those are
-# capped by what this caller grants. Grant the union the core needs:
+# #ASSUME The called reusable workflows declare their own per-job permissions,
+#   capped by what this caller grants; the grant below is the union they need.
+# #VERIFY Before editing this file or bumping the pinned reusable-workflow SHA,
+#   re-read both called workflows and confirm their jobs still request only this
+#   permission union (over-granting here widens the caller token's blast radius):
 #   contents: write       update-lock commit to the canonical approved-lock
 #   packages: write       crane push to GHCR
 #   id-token: write       cosign keyless signing + attestation
