@@ -1,0 +1,85 @@
+# ============================================================================
+# Supply Chain Mirror (caller, bake)
+# ============================================================================
+# First P3 slice: route ONE public DHI mirror (dhi-postgres-17) through the
+# shared trust core in ByronWilliamsCPA/.github, replacing the trust path of the
+# legacy mirror-hardened-images.yml:
+#
+#   verify   supply-chain-mirror-verify  resolve upstream digest (+ optional
+#            upstream-signature check); emits a digest-pinned source_ref
+#   promote  supply-chain-promote-core   Grype + Snyk scan BEFORE any public push
+#            (RT-4), then crane push to GHCR, dual SBOMs, cosign sign + attest +
+#            provenance, and append the canonical approved-lock entry (RT-10)
+#
+# BAKE POSTURE (deliberate, time-boxed):
+#   require_upstream_signature is false for now. mirror-verify still resolves and
+#   pins the exact upstream digest and promote-core still scans-before-publish
+#   and signs OUR attestation, which is strictly stronger than the legacy mirror.
+#   #ASSUME DHI publishes a Fulcio-verifiable cosign signature we can pin.
+#   #VERIFY confirm the real DHI signer identity + issuer, then flip
+#   require_upstream_signature to true with expected_identity_regexp /
+#   expected_issuer_regexp set, to fully close RT-1 for the mirror path.
+#
+# This is workflow_dispatch-only and additive: it does NOT retire
+# mirror-hardened-images.yml. Retirement + a catalog-driven matrix over all DHI
+# entries are follow-up slices once this proves out end-to-end.
+#
+# Reusable workflows are pinned to a full commit SHA (not @v1) per the org
+# action-pinning standard.
+# ============================================================================
+
+name: Supply Chain Mirror (bake)
+
+on:
+  workflow_dispatch:
+
+# #ASSUME The called reusable workflows declare their own per-job permissions,
+#   capped by what this caller grants; the grant below is the union they need.
+# #VERIFY Before editing this file or bumping the pinned reusable-workflow SHA,
+#   re-read both called workflows and confirm their jobs still request only this
+#   permission union (over-granting here widens the caller token's blast radius):
+#   contents: write       update-lock commit to the canonical approved-lock
+#   packages: write       crane push to GHCR
+#   id-token: write       cosign keyless signing + attestation
+#   attestations: write   GitHub build provenance
+#   security-events: write  Grype SARIF upload
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+  security-events: write
+
+jobs:
+  verify:
+    name: Verify upstream (dhi-postgres-17)
+    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-mirror-verify.yml@bec4d9f5baab87860dc2b3806b4c21745afab765
+    with:
+      upstream_registry: dhi.io
+      upstream_name: postgres
+      upstream_tag: "17-debian13"
+      platform: linux/amd64
+      # Bake: resolve + pin the digest now; graduate to a fail-closed signer
+      # check once the DHI Fulcio identity is confirmed (see header #VERIFY).
+      require_upstream_signature: false
+    secrets:
+      DHI_REGISTRY_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
+      DHI_REGISTRY_TOKEN: ${{ secrets.DHI_REGISTRY_TOKEN }}
+
+  promote:
+    name: Promote to GHCR (scan -> publish -> sign -> lock)
+    needs: verify
+    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-promote-core.yml@bec4d9f5baab87860dc2b3806b4c21745afab765
+    with:
+      image_id: dhi-postgres-17
+      source_kind: registry
+      source_ref: ${{ needs.verify.outputs.source_ref }}
+      ghcr_name: dhi-postgres
+      ghcr_tag: "17-debian13"
+      platform: linux/amd64
+      lock_file: catalog/approved-lock.yaml
+      write_lock: true
+      grype_fail_on: high
+      sign: true
+    secrets:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
