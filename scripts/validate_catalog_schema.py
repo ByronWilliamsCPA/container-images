@@ -90,7 +90,7 @@ _UPSTREAM_NAME_RE = re.compile(
 # single path segment so an entry can never traverse out of the org namespace.
 _GHCR_NAME_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 # OCI tag grammar: [A-Za-z0-9_][A-Za-z0-9._-]{0,127}.
-_TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
+_TAG_RE = re.compile(r"^\w[\w._-]{0,127}$", re.ASCII)
 # Manifest/index digest.
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -101,7 +101,7 @@ def _matches(pattern: re.Pattern[str], value: Any) -> bool:
     Guards against non-string YAML values (ints, lists, None) that would
     otherwise raise inside re.match and crash validation.
     """
-    return isinstance(value, str) and pattern.match(value) is not None
+    return isinstance(value, str) and pattern.fullmatch(value) is not None
 
 
 def error(msg: str, image_id: str = "") -> str:
@@ -159,7 +159,7 @@ def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
     ]
 
     registry = upstream.get("registry")
-    if registry is not None and registry not in ALLOWED_REGISTRIES:
+    if registry not in ALLOWED_REGISTRIES:
         errors.append(
             error(
                 f"upstream.registry {registry!r} is not allowed; "
@@ -169,7 +169,7 @@ def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
         )
 
     name = upstream.get("name")
-    if name is not None and not _matches(_UPSTREAM_NAME_RE, name):
+    if not _matches(_UPSTREAM_NAME_RE, name):
         errors.append(
             error(
                 f"upstream.name {name!r} is not a valid image path "
@@ -179,7 +179,7 @@ def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
         )
 
     tag = upstream.get("tag")
-    if tag is not None and not _matches(_TAG_RE, tag):
+    if not _matches(_TAG_RE, tag):
         errors.append(error(f"upstream.tag {tag!r} is not a valid tag", img_id))
 
     digest = upstream.get("digest")
@@ -190,7 +190,11 @@ def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
 
     # RT-6: a floating tag drifts after review. Require an explicit digest so the
     # mirror copies exactly the bytes vetted here, never whatever 'latest' becomes.
-    if isinstance(tag, str) and tag.lower() in MUTABLE_TAGS and not digest:
+    if (
+        isinstance(tag, str)
+        and tag.lower() in MUTABLE_TAGS
+        and not _matches(_DIGEST_RE, digest)
+    ):
         errors.append(
             error(
                 f"upstream.tag {tag!r} is mutable; pin upstream.digest "
@@ -216,7 +220,7 @@ def _validate_ghcr(
     ]
 
     ghcr_name = ghcr.get("name")
-    if ghcr_name is not None and not _matches(_GHCR_NAME_RE, ghcr_name):
+    if not _matches(_GHCR_NAME_RE, ghcr_name):
         errors.append(
             error(
                 f"ghcr.name {ghcr_name!r} must be a single lowercase path "
@@ -226,7 +230,7 @@ def _validate_ghcr(
         )
 
     ghcr_tag = ghcr.get("tag")
-    if ghcr_tag is not None and not _matches(_TAG_RE, ghcr_tag):
+    if not _matches(_TAG_RE, ghcr_tag):
         errors.append(error(f"ghcr.tag {ghcr_tag!r} is not a valid tag", img_id))
 
     ghcr_ref = f"ghcr.io/byronwilliamscpa/{ghcr.get('name', '')}:{ghcr.get('tag', '')}"
