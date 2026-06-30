@@ -24,6 +24,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keyless identity over unverified upstream bytes (trust laundering); disabling it
   removes false trust, not a working dependency. Re-enable once the shared
   `mirror-verify` workflow gates this job.
+- Add upstream registry allowlist (`dhi.io`, `gcr.io`) so any unlisted or
+  null registry is rejected at catalog validation time (RT-2).
+- Validate `upstream.name`, `upstream.tag`, `ghcr.name`, and `ghcr.tag` against
+  compiled regex patterns; drop the `is not None` guards that previously allowed
+  YAML null values to bypass shape checks (RT-7).
+- Switch `_matches()` to `re.fullmatch` so a trailing-newline in a field value
+  cannot bypass tag, name, or digest pattern gates.
+- Require an explicit `sha256:` digest pin for any entry whose `upstream.tag` is a
+  mutable label (`latest`, `stable`, `edge`, etc.) so the mirror copies exactly
+  the bytes vetted at review time and cannot drift (RT-6).
 - Reject present-but-null required fields in the approved-lock validator so a
   nulled `source_digest`, `target_digest`, `ghcr_ref`, `kind`, or `promoted`
   cannot bypass the provenance checks; match digests with `re.fullmatch` so a
