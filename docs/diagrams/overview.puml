@@ -1,0 +1,204 @@
+@startuml overview
+' ============================================================
+' container-images: Repository Overview
+' Single-screen mental model of how the repo works.
+' ============================================================
+
+title "container-images: Architecture Overview\n<size:12>ghcr.io/ByronWilliamsCPA/* hardened image mirror</size>"
+
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam ArrowFontSize 11
+skinparam ArrowThickness 1.5
+skinparam PackageBorderColor #888888
+skinparam PackageBorderThickness 1.5
+skinparam RectangleBorderThickness 1.5
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+
+' ============================================================
+' Color palette
+' ============================================================
+skinparam rectangle {
+  BackgroundColor<<catalog>>   #E8F5E9
+  BackgroundColor<<script>>    #E3F2FD
+  BackgroundColor<<gate>>      #FFF3E0
+  BackgroundColor<<pipeline>>  #E0F7FA
+  BackgroundColor<<output>>    #FFF8E1
+  BackgroundColor<<external>>  #E0E0E0
+  BackgroundColor<<security>>  #F3E5F5
+  BorderColor<<catalog>>   #388E3C
+  BorderColor<<script>>    #1565C0
+  BorderColor<<gate>>      #E65100
+  BorderColor<<pipeline>>  #00838F
+  BorderColor<<output>>    #F9A825
+  BorderColor<<external>>  #757575
+  BorderColor<<security>>  #6A1B9A
+}
+
+' ============================================================
+' External registries (upstream sources)
+' ============================================================
+package "External Registries (upstream sources)" <<external>> {
+  rectangle "dhi.io\n(Defense Hardened Images)" <<external>> as DHI
+  rectangle "gcr.io\n(Google Distroless)" <<external>> as GCR
+}
+
+' ============================================================
+' Catalog: single source of truth (A0)
+' ============================================================
+package "Catalog: Source of Truth  [A0]" <<catalog>> {
+  rectangle "catalog/images.yaml\n<size:10>id, upstream, ghcr, criticality\n~27 images (DHI + Distroless)</size>" <<catalog>> as CATALOG
+  rectangle "catalog/policies.yaml\n<size:10>Snyk/Trivy thresholds\nCVE exception framework</size>" <<catalog>> as POLICIES
+  rectangle "catalog/approved-lock.yaml\n<size:10>Digest-pinned promotion ledger\n[written by A3 pipeline]</size>" <<catalog>> as LOCK
+}
+
+' ============================================================
+' Scripts
+' ============================================================
+package "Glue Scripts" <<script>> {
+  rectangle "validate_catalog_schema.py\n<size:10>Schema + field validation\nDuplicate id/ref detection</size>" <<script>> as VALIDATE
+  rectangle "build_matrix.py\n<size:10>Emits GHA matrix JSON\nDHI vs Distroless tiers</size>" <<script>> as MATRIX
+  rectangle "load_scanner_policy.py\n<size:10>Translates policies.yaml\ninto scanner knobs</size>" <<script>> as POLICY_SCRIPT
+  rectangle "verify_approved_lock.py\n<size:10>Schema + digest invariant\nCatalog cross-reference</size>" <<script>> as VERIFY_LOCK
+  rectangle "update_approved_lock.py\n<size:10>Upserts promotion entry\ninto approved-lock.yaml</size>" <<script>> as UPDATE_LOCK
+}
+
+' ============================================================
+' Validate gate: required status check on every PR (A0/A3)
+' ============================================================
+package "Validate Gate  [A0/A3]  REQUIRED status check" <<gate>> {
+  rectangle "validate-catalog-schema.yml\n<size:10>1. validate_catalog_schema.py\n2. verify_approved_lock.py\n3. pytest (happy path + bypass cases)\n4. dry-run build_matrix.py\nTrigger: every PR to main</size>" <<gate>> as GATE
+}
+
+' ============================================================
+' A1: Mirror pipeline
+' ============================================================
+package "A1: Mirror Pipeline  (weekly + push to main)" <<pipeline>> {
+  rectangle "prepare job\n<size:10>validate catalog\nbuild_matrix.py -> GHA matrix</size>" <<pipeline>> as PREPARE
+  rectangle "mirror-dhi job\n<size:10>crane copy by digest\nTrivy scan (CRITICAL/HIGH block)\nSyft SBOM (CycloneDX)\nCosign sign + attest  [main only]</size>" <<pipeline>> as MIRROR_DHI
+  rectangle "mirror-distroless job\n<size:10>crane copy by digest\nTrivy scan (CRITICAL/HIGH block)\nSyft SBOM (CycloneDX)\nCosign sign + attest  [main only]</size>" <<pipeline>> as MIRROR_DISTROLESS
+}
+
+' ============================================================
+' A2: Promote pipeline (reusable workflow_call)
+' ============================================================
+package "A2: Promote Pipeline  (reusable workflow_call)" <<pipeline>> {
+  rectangle "promote job\n<size:10>1. Resolve upstream digest (crane)\n2. Upstream Cosign check (advisory)\n3. crane copy by digest -> GHCR\n4. Snyk gate (Critical/High block)\n5. Trivy gate (Critical/High block)\n6. Syft SBOM x2 (CycloneDX + SPDX)\n7. Cosign sign + attest  [main only]\n8. GitHub build provenance  [main only]</size>" <<pipeline>> as PROMOTE
+  rectangle "update-lock job\n<size:10>update_approved_lock.py\nWrites entry to approved-lock.yaml\n[main only, gated on promote success]</size>" <<pipeline>> as UPDATE_LOCK_JOB
+}
+
+' ============================================================
+' Outputs published to GHCR
+' ============================================================
+package "Published Output" <<output>> {
+  rectangle "ghcr.io/ByronWilliamsCPA/*\n<size:10>Signed + SBOM-attested images\nPublic, no auth required\nVerifiable via cosign</size>" <<output>> as GHCR
+}
+
+' ============================================================
+' Security and platform workflows (no internals shown)
+' ============================================================
+package "Security & platform workflows" <<security>> {
+  rectangle "codeql | scorecard | dependency-review | reuse\npr-validation | security-analysis | claude-baseline-review\n<size:10>SAST, supply-chain scoring, license compliance,\nPR checks, dependency audit, AI review</size>" <<security>> as SEC_WORKFLOWS
+}
+
+' ============================================================
+' Arrows: Catalog -> Scripts -> Gate
+' ============================================================
+CATALOG --> VALIDATE : "A0: read on\nevery PR + push"
+CATALOG --> MATRIX : "A0: build\nGHA matrix"
+CATALOG --> POLICY_SCRIPT : "A2: load\nscanner policy"
+CATALOG --> VERIFY_LOCK : "A3: cross-reference\nlock entries"
+LOCK --> VERIFY_LOCK : "A3: verify\nprovenance"
+
+VALIDATE --> GATE : "validate_catalog_schema.py"
+VERIFY_LOCK --> GATE : "verify_approved_lock.py"
+MATRIX ..> GATE : "dry-run check"
+
+' ============================================================
+' Arrows: Gate -> Pipelines
+' ============================================================
+GATE ==> PREPARE : "gate passes\n-> matrix built"
+GATE ..> PROMOTE : "gate is\nrequired prereq"
+
+' ============================================================
+' Arrows: A1 Mirror pipeline
+' ============================================================
+PREPARE --> MIRROR_DHI : "dhi_matrix\n(includes[])"
+PREPARE --> MIRROR_DISTROLESS : "distroless_matrix\n(includes[])"
+DHI ==> MIRROR_DHI : "crane copy\nby digest"
+GCR ==> MIRROR_DISTROLESS : "crane copy\nby digest"
+MIRROR_DHI ==> GHCR : "signed +\nSBOM-attested"
+MIRROR_DISTROLESS ==> GHCR : "signed +\nSBOM-attested"
+
+' ============================================================
+' Arrows: A2 Promote pipeline
+' ============================================================
+DHI --> PROMOTE : "upstream\ndigest resolve"
+GCR --> PROMOTE : "upstream\ndigest resolve"
+POLICIES --> POLICY_SCRIPT : "scanner\nthresholds"
+POLICY_SCRIPT --> PROMOTE : "snyk_threshold\ntrivy_severities\ntrivyignore"
+PROMOTE ==> GHCR : "promoted +\nsigned + attested"
+PROMOTE --> UPDATE_LOCK_JOB : "outputs: digests\n[main only]"
+UPDATE_LOCK_JOB --> UPDATE_LOCK : "calls"
+UPDATE_LOCK --> LOCK : "upserts\npromotion entry"
+
+' ============================================================
+' Security workflows: repo-level, no internals
+' ============================================================
+SEC_WORKFLOWS ..> CATALOG : "audits\nrepo contents"
+
+' ============================================================
+' Notes
+' ============================================================
+note bottom of GATE
+  **REQUIRED status check** gating merges to main.
+  Path-filtered on push (catalog + scripts + tests).
+  No path filter on pull_request (required checks must
+  always report or PRs deadlock).
+end note
+
+note right of GHCR
+  All images published via crane copy by digest.
+  No docker pull/push: reproducible digests guaranteed.
+  Cosign keyless sign + SBOM attestation on main only.
+  **See also:**
+  - mirror-hardened-images.svg (A1 detail)
+  - publish-approved-image.svg (A2 detail)
+end note
+
+note bottom of LOCK
+  **A3 promotion ledger.**
+  source_digest == target_digest enforced.
+  Validated by verify_approved_lock.py on every PR.
+  Bot GPG signing of lock commits: deferred (A3 follow-up).
+end note
+
+' ============================================================
+' Legend
+' ============================================================
+legend right
+  **Phase tags**
+  A0 - Catalog schema + matrix builder (complete)
+  A1 - Crane digest-copy mirror (complete)
+  A2 - Scanner policy + reusable promote (complete)
+  A3 - Promotion lock (partial: lock file + scripts done;
+       bot commit GPG signing deferred)
+
+  **Arrow types**
+  ==>  Primary pipeline flow (data moves through)
+  -->  Standard dependency / data read
+  ..>  Conditional / informational flow
+
+  **Box colors**
+  Green   Catalog (source of truth)
+  Blue    Glue scripts
+  Orange  Validate gate
+  Cyan    Pipelines (A1 / A2)
+  Yellow  Published output (GHCR)
+  Grey    External registries
+  Purple  Security & platform workflows
+endlegend
+
+@enduml

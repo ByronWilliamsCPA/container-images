@@ -1,0 +1,229 @@
+@startuml validate-catalog-schema
+' ============================================================
+' Validate Catalog Schema - CI Gate Workflow
+' Source: .github/workflows/validate-catalog-schema.yml
+' A0/A3 exit gate for catalog/images.yaml and
+' catalog/approved-lock.yaml; REQUIRED status check on main.
+' ============================================================
+
+!define ARROW_COLOR #2C3E50
+!define GATE_COLOR  #D32F2F
+!define PASS_COLOR  #2E7D32
+
+skinparam activity {
+  BackgroundColor        #F5F5F5
+  BorderColor            #455A64
+  FontName               Helvetica
+  FontSize               11
+  ArrowColor             #2C3E50
+  ArrowFontSize          10
+  StartColor             #263238
+  EndColor               #263238
+  DiamondBackgroundColor #FFF9C4
+  DiamondBorderColor     #F57F17
+  DiamondFontSize        10
+}
+
+skinparam note {
+  BackgroundColor #E3F2FD
+  BorderColor     #1565C0
+  FontSize        10
+}
+
+skinparam legend {
+  BackgroundColor #FAFAFA
+  BorderColor     #B0BEC5
+  FontSize        10
+}
+
+title Validate Catalog Schema\n<size:10>//A0/A3 exit gate -- required status check on main//</size>
+
+' ============================================================
+' TRIGGERS
+' ============================================================
+
+|Triggers|
+start
+
+note right
+  **Trigger matrix**
+  //push// to main -- paths:
+    catalog/images.yaml
+    catalog/approved-lock.yaml
+    scripts/validate_catalog_schema.py
+    scripts/verify_approved_lock.py
+    scripts/build_matrix.py
+    tests/**
+    .github/workflows/validate-catalog-schema.yml
+  //merge_group//
+  //workflow_dispatch//
+end note
+
+note right #FFCDD2
+  **#CRITICAL -- required status check**
+  The //pull_request// trigger carries **no** //paths://
+  filter by design. A required status check must
+  report a result on **every** PR to main. Adding
+  a //paths:// filter causes non-matching PRs to be
+  skipped -- GitHub never reports a result -- and
+  the PR becomes stuck on:
+  "Expected - Waiting for status to be reported."
+  **Never re-add paths: here unless this check is**
+  **removed from branch protection first.**
+  //Source: validate-catalog-schema.yml:27-35//
+end note
+
+:Workflow triggered;
+
+' ============================================================
+' JOB: validate (ubuntu-latest, timeout 5 min)
+' ============================================================
+
+|validate job\n(ubuntu-latest, 5 min timeout)|
+
+' --- Step 1 ---
+#LightBlue:1. Harden Runner\n<size:9>step-security/harden-runner@9af89fc (v2.19.4)\negress-policy: audit</size>;
+note right
+  **Source:**
+  .github/workflows/
+    validate-catalog-schema.yml:55-58
+end note
+
+' --- Step 2 ---
+#LightBlue:2. Checkout repository\n<size:9>actions/checkout@9c091bb (v7)\npersist-credentials: false</size>;
+note right
+  **Source:**
+  validate-catalog-schema.yml:60-63
+end note
+
+' --- Step 3 ---
+#LightBlue:3. Set up Python 3.12\n<size:9>actions/setup-python@ece7cb0 (v6.3.0)</size>;
+note right
+  **Source:**
+  validate-catalog-schema.yml:65-68
+end note
+
+' --- Step 4 ---
+#LightBlue:4. Install dependencies\n<size:9>pip install pyyaml pytest</size>;
+note right
+  **Source:**
+  validate-catalog-schema.yml:70-71
+end note
+
+' --- Step 5: pip-audit ---
+#FFF3E0:5. Audit dependencies\n<size:9>pip install pip-audit && pip-audit\nDependency CVE scan</size>;
+note right
+  **Source:**
+  validate-catalog-schema.yml:73-76
+  **Purpose:** detect known CVEs in
+  pyyaml, pytest, pip-audit itself
+end note
+
+if (CVEs found?) then (yes -- fail)
+  #FFCDD2:FAIL: dependency audit;\n-> merge blocked;
+  stop
+else (no -- pass)
+endif
+
+' --- Step 6: schema gate ---
+#E8F5E9:**6. Validate catalog schema**\n<size:9>python3 scripts/validate_catalog_schema.py\n       catalog/images.yaml\nA0 gate: required fields, enums, GHCR ref\nuniqueness, upstream/platform shape</size>;
+note right
+  **Source gate:**
+  validate-catalog-schema.yml:78-79
+  scripts/validate_catalog_schema.py
+  Input: catalog/images.yaml
+  Checks: required fields, source_tier,
+  criticality, disposition, GHCR ref
+  uniqueness, platform_compatibility
+end note
+
+if (Schema errors?) then (yes -- fail)
+  #FFCDD2:FAIL: catalog schema gate;\n-> merge blocked;
+  stop
+else (no -- pass)
+endif
+
+' --- Step 7: A3 provenance gate ---
+#E8F5E9:**7. Verify approved-lock provenance**\n<size:9>python3 scripts/verify_approved_lock.py\n       catalog/approved-lock.yaml\n       catalog/images.yaml\nA3 gate: schema + source==target digest\n+ catalog cross-reference</size>;
+note right
+  **Source gate:**
+  validate-catalog-schema.yml:81-84
+  scripts/verify_approved_lock.py
+  Inputs: approved-lock.yaml,
+          images.yaml
+  Checks:
+    (a) schema: required fields, kind
+    (b) source_digest == target_digest
+    (c) digest format sha256:<64hex>
+    (d) id present in catalog
+    (e) ghcr_ref matches catalog
+    (f) id uniqueness in lock
+  Output: trusted approved-lock.yaml
+end note
+
+if (Provenance errors?) then (yes -- fail)
+  #FFCDD2:FAIL: A3 provenance gate;\n-> merge blocked;
+  stop
+else (no -- pass)
+endif
+
+' --- Step 8: pytest ---
+#E8F5E9:**8. Run tests**\n<size:9>python3 -m pytest tests/ -v --tb=short\nHappy-path + bypass-attempt cases</size>;
+note right
+  **Source:**
+  validate-catalog-schema.yml:86-87
+  Scope: tests/**
+  Covers: valid catalog acceptance,
+  tampered-digest bypass attempts,
+  null-field bypass attempts,
+  duplicate-id rejection
+end note
+
+if (Tests fail?) then (yes -- fail)
+  #FFCDD2:FAIL: pytest suite;\n-> merge blocked;
+  stop
+else (no -- pass)
+endif
+
+' --- Step 9: dry-run matrix build ---
+#E8F5E9:**9. Dry-run matrix build**\n<size:9>python3 scripts/build_matrix.py\n       catalog/images.yaml\nVerify matrix builder parses\nvalidated catalog without error</size>;
+note right
+  **Source:**
+  validate-catalog-schema.yml:89-90
+  scripts/build_matrix.py
+  Input: catalog/images.yaml
+  (catalog already validated above)
+end note
+
+if (Matrix build fails?) then (yes -- fail)
+  #FFCDD2:FAIL: dry-run matrix build;\n-> merge blocked;
+  stop
+else (no -- pass)
+endif
+
+' ============================================================
+' SUCCESS
+' ============================================================
+
+#C8E6C9:**All gates passed**\n<size:9>approved-lock.yaml is the trusted output\nRequired status check reports: SUCCESS\nPR merge to main is unblocked</size>;
+
+stop
+
+' ============================================================
+' LEGEND
+' ============================================================
+
+legend bottom
+  |= Color |= Meaning |
+  |<#LightBlue>      | Environment / setup step |
+  |<#FFF3E0>      | Security audit gate |
+  |<#E8F5E9>      | Validation gate (blocks merge on failure) |
+  |<#FFCDD2>      | Failure -- merge blocked |
+  |<#C8E6C9>      | Success -- merge unblocked |
+
+  **Required check:** "Validate catalog schema"
+  **Branch protection:** targets main; gates ALL pull_request events
+  **Job:** validate | ubuntu-latest | timeout 5 min | permissions: contents read
+endlegend
+
+@enduml
