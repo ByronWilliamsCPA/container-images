@@ -12,6 +12,7 @@ Usage:
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,47 @@ REQUIRED_UPSTREAM_FIELDS = {"registry", "name", "tag"}
 REQUIRED_GHCR_FIELDS = {"name", "tag"}
 REQUIRED_PLATFORM_FIELDS = {"default", "supported"}
 
+# RT-2: only these registries may feed the mirror. Anything else (a typo,
+# a look-alike, or an attacker-controlled host) is rejected outright.
+ALLOWED_REGISTRIES = {"dhi.io", "gcr.io"}
+
+# RT-6: a floating tag is not a durable pin. When upstream.tag is one of these,
+# the entry MUST also carry an upstream.digest so the mirror copies exactly the
+# bytes reviewed here, not whatever the tag later drifts to.
+MUTABLE_TAGS = {
+    "latest",
+    "stable",
+    "edge",
+    "main",
+    "master",
+    "nightly",
+    "dev",
+    "rolling",
+}
+
+# Value-shape patterns (RT-2, RT-7).
+# Upstream repo path: lowercase OCI path components joined by '/'. Rejects '..'
+# traversal, leading/trailing slashes, and uppercase/space injection.
+_UPSTREAM_NAME_RE = re.compile(
+    r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+)
+# ghcr.name is published UNDER ghcr.io/byronwilliamscpa/. Constrain it to a
+# single path segment so an entry can never traverse out of the org namespace.
+_GHCR_NAME_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+# OCI tag grammar: [A-Za-z0-9_][A-Za-z0-9._-]{0,127}.
+_TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
+# Manifest/index digest.
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _matches(pattern: re.Pattern[str], value: Any) -> bool:
+    """True only when value is a string fully matching pattern.
+
+    Guards against non-string YAML values (ints, lists, None) that would
+    otherwise raise inside re.match and crash validation.
+    """
+    return isinstance(value, str) and pattern.match(value) is not None
+
 
 def error(msg: str, image_id: str = "") -> str:
     prefix = f"[{image_id}] " if image_id else ""
@@ -106,15 +148,58 @@ def _validate_image_modification(img: dict[str, Any], img_id: str) -> list[str]:
 
 
 def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
-    """Validate the upstream mapping and its required fields."""
+    """Validate the upstream mapping: required fields, value shapes, digest pin."""
     upstream = img.get("upstream", {})
     if not isinstance(upstream, dict):
         return [error("upstream must be a mapping", img_id)]
-    missing_u = REQUIRED_UPSTREAM_FIELDS - set(upstream.keys())
-    return [
+
+    errors = [
         error(f"upstream missing required field: {field!r}", img_id)
-        for field in sorted(missing_u)
+        for field in sorted(REQUIRED_UPSTREAM_FIELDS - set(upstream.keys()))
     ]
+
+    registry = upstream.get("registry")
+    if registry is not None and registry not in ALLOWED_REGISTRIES:
+        errors.append(
+            error(
+                f"upstream.registry {registry!r} is not allowed; "
+                f"must be one of {sorted(ALLOWED_REGISTRIES)}",
+                img_id,
+            )
+        )
+
+    name = upstream.get("name")
+    if name is not None and not _matches(_UPSTREAM_NAME_RE, name):
+        errors.append(
+            error(
+                f"upstream.name {name!r} is not a valid image path "
+                "(lowercase segments, no traversal)",
+                img_id,
+            )
+        )
+
+    tag = upstream.get("tag")
+    if tag is not None and not _matches(_TAG_RE, tag):
+        errors.append(error(f"upstream.tag {tag!r} is not a valid tag", img_id))
+
+    digest = upstream.get("digest")
+    if digest is not None and not _matches(_DIGEST_RE, digest):
+        errors.append(
+            error(f"upstream.digest {digest!r} must be sha256:<64 hex>", img_id)
+        )
+
+    # RT-6: a floating tag drifts after review. Require an explicit digest so the
+    # mirror copies exactly the bytes vetted here, never whatever 'latest' becomes.
+    if isinstance(tag, str) and tag.lower() in MUTABLE_TAGS and not digest:
+        errors.append(
+            error(
+                f"upstream.tag {tag!r} is mutable; pin upstream.digest "
+                "(sha256:...) so the mirror cannot drift",
+                img_id,
+            )
+        )
+
+    return errors
 
 
 def _validate_ghcr(
@@ -129,6 +214,21 @@ def _validate_ghcr(
         error(f"ghcr missing required field: {field!r}", img_id)
         for field in sorted(missing_g)
     ]
+
+    ghcr_name = ghcr.get("name")
+    if ghcr_name is not None and not _matches(_GHCR_NAME_RE, ghcr_name):
+        errors.append(
+            error(
+                f"ghcr.name {ghcr_name!r} must be a single lowercase path "
+                "segment (no '/', no '..' traversal)",
+                img_id,
+            )
+        )
+
+    ghcr_tag = ghcr.get("tag")
+    if ghcr_tag is not None and not _matches(_TAG_RE, ghcr_tag):
+        errors.append(error(f"ghcr.tag {ghcr_tag!r} is not a valid tag", img_id))
+
     ghcr_ref = f"ghcr.io/byronwilliamscpa/{ghcr.get('name', '')}:{ghcr.get('tag', '')}"
     if ghcr_ref in seen_ghcr_refs:
         errors.append(error(f"duplicate GHCR ref: {ghcr_ref}", img_id))

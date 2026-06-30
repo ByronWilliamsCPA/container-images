@@ -248,6 +248,139 @@ class TestValidateNonDictSubfields:
 
 
 # ---------------------------------------------------------------------------
+# Value validation: registry allowlist, name/tag shapes, digest pin
+# (RT-2 / RT-6 / RT-7 bypass attempts)
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryAllowlist:
+    def test_unapproved_registry_rejected(self):
+        """An attacker-controlled registry must not pass presence-only checks."""
+        img = minimal_image()
+        img["upstream"]["registry"] = "evil.example.com"
+        errors = validate(minimal_catalog(img))
+        assert any("registry" in e and "not allowed" in e for e in errors)
+
+    def test_lookalike_registry_rejected(self):
+        img = minimal_image()
+        img["upstream"]["registry"] = "dhi.io.evil.com"
+        errors = validate(minimal_catalog(img))
+        assert any("not allowed" in e for e in errors)
+
+    def test_allowed_registries_pass(self):
+        for reg, name in (("dhi.io", "postgres"), ("gcr.io", "distroless/static")):
+            img = minimal_image(
+                upstream={"registry": reg, "name": name, "tag": "1-debian13"}
+            )
+            assert validate(minimal_catalog(img)) == [], f"{reg} should be allowed"
+
+
+class TestUpstreamNameShape:
+    def test_path_traversal_name_rejected(self):
+        img = minimal_image()
+        img["upstream"]["name"] = "../../etc/passwd"
+        errors = validate(minimal_catalog(img))
+        assert any("upstream.name" in e for e in errors)
+
+    def test_uppercase_name_rejected(self):
+        img = minimal_image()
+        img["upstream"]["name"] = "Library/Postgres"
+        errors = validate(minimal_catalog(img))
+        assert any("upstream.name" in e for e in errors)
+
+    def test_non_string_name_rejected_without_crash(self):
+        img = minimal_image()
+        img["upstream"]["name"] = ["not", "a", "string"]
+        errors = validate(minimal_catalog(img))
+        assert any("upstream.name" in e for e in errors)
+
+    def test_nested_path_name_allowed(self):
+        img = minimal_image()
+        img["upstream"]["name"] = "distroless/python3-debian12"
+        # tag stays non-mutable so the digest rule does not also fire
+        assert validate(minimal_catalog(img)) == []
+
+
+class TestGhcrNameShape:
+    def test_ghcr_name_traversal_rejected(self):
+        img = minimal_image()
+        img["ghcr"]["name"] = "../../org-secret"
+        errors = validate(minimal_catalog(img))
+        assert any("ghcr.name" in e for e in errors)
+
+    def test_ghcr_name_extra_segment_rejected(self):
+        """A second path segment could push outside the org namespace."""
+        img = minimal_image()
+        img["ghcr"]["name"] = "dhi-test/evil"
+        errors = validate(minimal_catalog(img))
+        assert any("ghcr.name" in e for e in errors)
+
+    def test_ghcr_name_uppercase_rejected(self):
+        img = minimal_image()
+        img["ghcr"]["name"] = "DHI-Test"
+        errors = validate(minimal_catalog(img))
+        assert any("ghcr.name" in e for e in errors)
+
+
+class TestTagShape:
+    def test_tag_with_space_rejected(self):
+        img = minimal_image()
+        img["upstream"]["tag"] = "1-debian13 && rm -rf /"
+        errors = validate(minimal_catalog(img))
+        assert any("upstream.tag" in e for e in errors)
+
+    def test_ghcr_tag_with_slash_rejected(self):
+        img = minimal_image()
+        img["ghcr"]["tag"] = "1/../latest"
+        errors = validate(minimal_catalog(img))
+        assert any("ghcr.tag" in e for e in errors)
+
+
+class TestMutableTagDigestPin:
+    def test_latest_without_digest_rejected(self):
+        """RT-6: a mutable tag must be backed by a pinned digest."""
+        img = minimal_image(
+            upstream={
+                "registry": "gcr.io",
+                "name": "distroless/static",
+                "tag": "latest",
+            }
+        )
+        errors = validate(minimal_catalog(img))
+        assert any("mutable" in e and "digest" in e for e in errors)
+
+    def test_latest_with_valid_digest_passes(self):
+        digest = "sha256:" + "a" * 64
+        img = minimal_image(
+            upstream={
+                "registry": "gcr.io",
+                "name": "distroless/static",
+                "tag": "latest",
+                "digest": digest,
+            }
+        )
+        assert validate(minimal_catalog(img)) == []
+
+    def test_malformed_digest_rejected(self):
+        img = minimal_image(
+            upstream={
+                "registry": "dhi.io",
+                "name": "postgres",
+                "tag": "16-debian13",
+                "digest": "sha256:not-hex",
+            }
+        )
+        errors = validate(minimal_catalog(img))
+        assert any("digest" in e for e in errors)
+
+    def test_immutable_tag_needs_no_digest(self):
+        img = minimal_image(
+            upstream={"registry": "dhi.io", "name": "postgres", "tag": "16-debian13"}
+        )
+        assert validate(minimal_catalog(img)) == []
+
+
+# ---------------------------------------------------------------------------
 # main(): file I/O and exit-code contract
 # ---------------------------------------------------------------------------
 
