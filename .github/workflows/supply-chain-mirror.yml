@@ -1,9 +1,9 @@
 # ============================================================================
 # Supply Chain Mirror (caller, bake)
 # ============================================================================
-# First P3 slice: route ONE public DHI mirror (dhi-postgres-17) through the
-# shared trust core in ByronWilliamsCPA/.github, replacing the trust path of the
-# legacy mirror-hardened-images.yml:
+# First P3 slice: route ONE public mirror through the shared trust core in
+# ByronWilliamsCPA/.github, replacing the trust path of the legacy
+# mirror-hardened-images.yml:
 #
 #   verify   supply-chain-mirror-verify  resolve upstream digest (+ optional
 #            upstream-signature check); emits a digest-pinned source_ref
@@ -11,17 +11,35 @@
 #            (RT-4), then crane push to GHCR, dual SBOMs, cosign sign + attest +
 #            provenance, and append the canonical approved-lock entry (RT-10)
 #
+# BAKE TARGET (deliberate): gcr.io/distroless/static-debian12. This image is a
+# minimal static base built FROM scratch: no glibc, no shell. It is chosen as
+# the first published mirror because it carries no critical-severity OS-package
+# CVEs, so it proves the publish -> SBOM -> sign -> attest -> lock half of the
+# pipeline end-to-end WITHOUT relaxing the scan gate.
+#
+#   #ASSUME the DHI postgres/redis/python mirrors stay HELD while glibc carries
+#   the unfixable CVE-2026-5450 (NVD 9.8, no trixie backport; fix only in
+#   forky/sid). A strict critical-only gate fails them closed by design.
+#   #VERIFY re-point this caller back to a DHI target once `crane` confirms the
+#   chosen upstream digest is clean of Grype-native CRITICAL findings (track
+#   CVE-2026-5450 reaching `fixed` for Debian trixie).
+#
+# UPSTREAM AUTH: gcr.io distroless is public, so NO upstream credentials are
+# passed. Both reusable workflows fall back to an anonymous pull when the
+# UPSTREAM_REGISTRY_* / DHI_REGISTRY_* secrets are absent.
+#
 # BAKE POSTURE (deliberate, time-boxed):
 #   require_upstream_signature is false for now. mirror-verify still resolves and
 #   pins the exact upstream digest and promote-core still scans-before-publish
 #   and signs OUR attestation, which is strictly stronger than the legacy mirror.
-#   #ASSUME DHI publishes a Fulcio-verifiable cosign signature we can pin.
-#   #VERIFY confirm the real DHI signer identity + issuer, then flip
+#   #ASSUME the distroless project publishes a Fulcio-verifiable cosign signature
+#   we can pin.
+#   #VERIFY confirm the real distroless signer identity + issuer, then flip
 #   require_upstream_signature to true with expected_identity_regexp /
 #   expected_issuer_regexp set, to fully close RT-1 for the mirror path.
 #
 # This is workflow_dispatch-only and additive: it does NOT retire
-# mirror-hardened-images.yml. Retirement + a catalog-driven matrix over all DHI
+# mirror-hardened-images.yml. Retirement + a catalog-driven matrix over all
 # entries are follow-up slices once this proves out end-to-end.
 #
 # Reusable workflows are pinned to a full commit SHA (not @v1) per the org
@@ -52,43 +70,37 @@ permissions:
 
 jobs:
   verify:
-    name: Verify upstream (dhi-postgres-17)
+    name: Verify upstream (distroless-static)
     uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-mirror-verify.yml@5825ec597cb87f66efcc471f7f2d9fd47e5dcf14
     with:
-      upstream_registry: dhi.io
-      upstream_name: postgres
-      upstream_tag: "17-debian13"
+      upstream_registry: gcr.io
+      upstream_name: distroless/static-debian12
+      upstream_tag: "latest"
       platform: linux/amd64
       # Bake: resolve + pin the digest now; graduate to a fail-closed signer
-      # check once the DHI Fulcio identity is confirmed (see header #VERIFY).
+      # check once the distroless Fulcio identity is confirmed (see header
+      # #VERIFY). gcr.io is public, so no upstream credentials are supplied.
       require_upstream_signature: false
-    secrets:
-      DHI_REGISTRY_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
-      DHI_REGISTRY_TOKEN: ${{ secrets.DHI_REGISTRY_TOKEN }}
 
   promote:
     name: Promote to GHCR (scan -> publish -> sign -> lock)
     needs: verify
     uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-promote-core.yml@5825ec597cb87f66efcc471f7f2d9fd47e5dcf14
     with:
-      image_id: dhi-postgres-17
+      image_id: distroless-static
       source_kind: registry
       source_ref: ${{ needs.verify.outputs.source_ref }}
-      ghcr_name: dhi-postgres
-      ghcr_tag: "17-debian13"
+      ghcr_name: distroless-static
+      ghcr_tag: "latest"
       platform: linux/amd64
       lock_file: catalog/approved-lock.yaml
       write_lock: true
-      # Mirror posture: block only on CRITICAL. We mirror upstream and cannot
-      # patch OS packages ourselves, and DHI images carry unfixed HIGH/MEDIUM/LOW
-      # CVEs (e.g. CVE-2026-54371 in libattr1) with no remediation path at mirror
-      # time. HIGH and below still surface as Grype SARIF for review; CRITICAL
-      # fails closed before publish.
+      # Mirror posture unchanged: block only on CRITICAL. distroless-static is a
+      # scratch-based static image with no libc and no shell, so it is expected
+      # to clear this gate cleanly; HIGH and below still surface as Grype SARIF.
       grype_fail_on: critical
       sign: true
     secrets:
+      # gcr.io distroless is anonymous: no UPSTREAM_REGISTRY_* creds. SNYK_TOKEN
+      # still drives the optional second scan in promote-core.
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      # dhi.io is authenticated: the scan job's crane pull needs these to fetch
-      # the bytes mirror-verify only resolved (org .github #237).
-      UPSTREAM_REGISTRY_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
-      UPSTREAM_REGISTRY_TOKEN: ${{ secrets.DHI_REGISTRY_TOKEN }}
