@@ -1,0 +1,303 @@
+@startuml mirror-hardened-images
+'===========================================================================
+' Mirror Hardened Images to GHCR
+' Workflow: .github/workflows/mirror-hardened-images.yml
+'===========================================================================
+
+title Mirror Hardened Images to GHCR\nA1: crane copy-by-digest pipeline
+
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 12
+skinparam ArrowColor #444444
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+
+skinparam partition {
+  BackgroundColor #F5F5F5
+  BorderColor #9E9E9E
+  FontStyle bold
+}
+
+skinparam activity {
+  BackgroundColor #E3F2FD
+  BorderColor #1565C0
+  DiamondBackgroundColor #FFF3E0
+  DiamondBorderColor #E65100
+  StartColor #1B5E20
+  EndColor #B71C1C
+}
+
+' ---------------------------------------------------------------------------
+' TRIGGERS (shown as a fork from start)
+' ---------------------------------------------------------------------------
+start
+
+note right
+  **Triggers** (yml:24-42)
+  - Schedule: weekly cron Sun 02:00 UTC
+  - workflow_dispatch (force-update: bool)
+  - push to main: paths
+    - .github/workflows/mirror-hardened-images.yml
+    - catalog/images.yaml
+
+  **Concurrency** (yml:44-46)
+  Group: mirror-hardened-images
+  cancel-in-progress: false
+  (prevents partial GHCR tags)
+end note
+
+' ===========================================================================
+' JOB: prepare
+' ===========================================================================
+partition "Job: prepare (ubuntu-latest, 5 min)" {
+
+  :Harden Runner\n(egress-policy: audit);
+  note right: yml:86-89
+
+  :Checkout repository\n(persist-credentials: false);
+
+  :Set up Python 3.12;
+
+  :Install PyYAML 6.0.3;
+
+  :Validate catalog schema\npython3 scripts/validate_catalog_schema.py;
+  note right
+    **EXIT GATE** (yml:104-105)
+    Fails the entire pipeline if
+    catalog/images.yaml is invalid.
+    No matrices are built on failure.
+  end note
+
+  if (Schema valid?) then (yes)
+    :Build image matrices\npython3 scripts/build_matrix.py catalog/images.yaml;
+    note right
+      **Outputs** (yml:78-82)
+      - dhi_matrix (JSON)
+      - distroless_matrix (JSON)
+      - dhi_count
+      - distroless_count
+    end note
+  else (no)
+    #FF6B6B:Fail: schema error\nexit 1;
+    stop
+  endif
+
+}
+
+' ===========================================================================
+' Fan-out: mirror-dhi and mirror-distroless run in parallel
+' ===========================================================================
+note right
+  **Job dependency** (yml:116, 307)
+  Both mirror jobs: needs: prepare
+  Both run in parallel (fail-fast: false)
+  environment: publish
+  Permissions: packages:write, id-token:write,
+  security-events:write
+end note
+
+fork
+  ' =========================================================================
+  ' JOB: mirror-dhi (matrix fan-out)
+  ' =========================================================================
+  partition "Job: mirror-dhi [matrix] (ubuntu-latest, 20 min)" {
+
+    :Harden Runner (egress-policy: audit);
+    note right: yml:134-137
+
+    :Checkout repository;
+
+    :Install crane v0.20.2\n(download + sha256 verify before extract);
+    note right
+      **Checksum guard** (yml:143-156)
+      sha256sum --check against
+      CRANE_SHA256 (in-repo anchor).
+      Binary extracted only on match.
+    end note
+
+    :Mask registry credentials\n(DHI_REGISTRY_TOKEN, GH_TOKEN);
+
+    :Authenticate crane\ndhi.io (DHI token)\nghcr.io (GITHUB_TOKEN);
+
+    ' A1 copy-by-digest
+    :Resolve upstream digest\ncrane digest SOURCE --platform PLATFORM;
+    note right: yml:202 - SOURCE_DIGEST
+
+    :crane copy SOURCE@DIGEST TARGET\n(content-addressed copy);
+    note right: yml:206 - no TOCTOU gap
+
+    :Resolve target digest\ncrane digest TARGET;
+    note right: yml:209 - TARGET_DIGEST
+
+    if (SOURCE_DIGEST == TARGET_DIGEST?) then (match)
+      :Emit outputs: source, target, digest\nWrite step summary row;
+    else (mismatch)
+      #FF6B6B:Fail: Digest mismatch!\nexit 1;
+      note right
+        **DIGEST ASSERTION** (yml:210-215)
+        Hard fail - protects against
+        supply-chain substitution.
+      end note
+      stop
+    endif
+
+    :Install Cosign v4.1.2;
+
+    :Scan with Trivy (CRITICAL, HIGH)\nexit-code: 1 on findings;
+    note right
+      **TRIVY EXIT GATE** (yml:229-236)
+      SARIF format output.
+      Blocks promotion on
+      CRITICAL or HIGH CVEs.
+    end note
+
+    if (Trivy: CRITICAL/HIGH found?) then (yes)
+      :Upload SARIF to Security tab\n(if: always());
+      #FF6B6B:Fail: Trivy gate\nexit 1;
+      stop
+    else (no - clean)
+      :Upload SARIF to Security tab\n(if: always());
+    endif
+
+    :Generate SBOM with Syft\n(CycloneDX JSON)\nvia docker run anchore/syft@sha256:SYFT_SHA256;
+    note right
+      **Digest-pinned** (yml:260)
+      Syft image pulled by digest
+      (SYFT_SHA256 env var) to
+      prevent substitution.
+    end note
+
+    if (github.ref == refs/heads/main?) then (yes - main branch)
+      #E8F5E9:Sign image with Cosign\ncosign sign --yes TARGET@DIGEST;
+      note right: **MAIN-ONLY** (yml:269)
+
+      #E8F5E9:Attest SBOM with Cosign\ncosign attest --yes --type cyclonedx;
+      note right: **MAIN-ONLY** (yml:277-278)
+    else (no - non-main branch)
+      :Skip sign + attest\n(not on main);
+    endif
+
+  }
+
+fork again
+  ' =========================================================================
+  ' JOB: mirror-distroless (matrix fan-out)
+  ' =========================================================================
+  partition "Job: mirror-distroless [matrix] (ubuntu-latest, 15 min)" {
+
+    :Harden Runner (egress-policy: audit);
+    note right: yml:313-316
+
+    :Checkout repository;
+
+    :Install crane v0.20.2\n(download + sha256 verify before extract);
+
+    :Mask GitHub token;
+
+    :Authenticate crane\nghcr.io only (GITHUB_TOKEN)\n[gcr.io - public, no auth needed];
+
+    :Resolve upstream digest\ncrane digest SOURCE --platform PLATFORM;
+    note right: yml:363 - gcr.io source
+
+    :crane copy SOURCE@DIGEST TARGET\n(content-addressed copy);
+
+    :Resolve target digest\ncrane digest TARGET;
+
+    if (SOURCE_DIGEST == TARGET_DIGEST?) then (match)
+      :Emit outputs: source, target, digest\nWrite step summary row;
+    else (mismatch)
+      #FF6B6B:Fail: Digest mismatch!\nexit 1;
+      stop
+    endif
+
+    :Install Cosign v4.1.2;
+
+    :Scan with Trivy (CRITICAL, HIGH)\nexit-code: 1 on findings;
+
+    if (Trivy: CRITICAL/HIGH found?) then (yes)
+      :Upload SARIF to Security tab\n(if: always());
+      #FF6B6B:Fail: Trivy gate\nexit 1;
+      stop
+    else (no - clean)
+      :Upload SARIF to Security tab\n(if: always());
+    endif
+
+    :Generate SBOM with Syft\n(CycloneDX JSON)\nvia docker run anchore/syft@sha256:SYFT_SHA256;
+
+    if (github.ref == refs/heads/main?) then (yes - main branch)
+      #E8F5E9:Sign image with Cosign\ncosign sign --yes TARGET@DIGEST;
+      note right: **MAIN-ONLY** (yml:419)
+
+      #E8F5E9:Attest SBOM with Cosign\ncosign attest --yes --type cyclonedx;
+      note right: **MAIN-ONLY** (yml:425-426)
+    else (no - non-main branch)
+      :Skip sign + attest;
+    endif
+
+  }
+
+end fork
+
+' ===========================================================================
+' JOB: summary
+' ===========================================================================
+partition "Job: summary (if: always())" {
+
+  note left
+    **Dependency** (yml:442)
+    needs: [prepare, mirror-dhi, mirror-distroless]
+    Runs regardless of upstream outcome
+    (if: always())
+  end note
+
+  :Harden Runner (egress-policy: audit);
+
+  :Generate step summary\nRun number, trigger, per-job counts;
+  note right
+    **Summary table** (yml:465-474)
+    DHI count, distroless count,
+    per-job result strings,
+    copy method: crane copy by digest (A1)
+  end note
+
+  if (DHI result == success\nAND distroless result == success?) then (both success)
+    :Summary: all mirrors succeeded;
+  else (any failure)
+    #FF6B6B:Fail: mirror job(s) did not succeed\nexit 1;
+    note right
+      **Failure check** (yml:476-492)
+      Checks DHI_RESULT and DISTROLESS_RESULT
+      from needs context. Exits 1 if either
+      is not "success".
+    end note
+  endif
+
+}
+
+stop
+
+' ===========================================================================
+' LEGEND
+' ===========================================================================
+legend right
+  **Legend**
+  |= Symbol |= Meaning |
+  | <color:#1B5E20>filled circle</color> | Workflow start |
+  | <color:#B71C1C>filled circle</color> | Workflow end |
+  | <color:#E65100>diamond</color> | Decision / gate point |
+  | <color:#FF6B6B>red activity</color> | Hard failure - job exits 1 |
+  | <color:#E8F5E9>green activity</color> | Main-branch-only step |
+  | [matrix] | Each job fans out over N images (fail-fast: false) |
+  | fork / fork again | Parallel job execution |
+
+  **External systems accessed:**
+  - dhi.io (DHI registry - source for primary tier)
+  - gcr.io (Google Container Registry - source for distroless tier)
+  - ghcr.io (GitHub Container Registry - mirror destination)
+  - sigstore (Cosign keyless signing / attestation, main only)
+
+  **Source:** .github/workflows/mirror-hardened-images.yml
+  **Matrix source:** catalog/images.yaml -> scripts/build_matrix.py
+endlegend
+
+@enduml

@@ -1,0 +1,212 @@
+@startuml publish-approved-image
+' =============================================================================
+' Publish Approved Image (A2 Reusable Workflow)
+' Source: .github/workflows/publish-approved-image.yml
+' =============================================================================
+
+title Publish Approved Image\nA2 Reusable Promotion Pipeline (workflow_call)
+
+' ---- skinparam ---------------------------------------------------------------
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 11
+skinparam backgroundColor #FAFAFA
+skinparam shadowing false
+skinparam ArrowColor #424242
+skinparam ArrowThickness 1.5
+
+skinparam rectangle {
+  BorderColor #757575
+  FontColor #212121
+}
+
+skinparam note {
+  BackgroundColor #FFF9C4
+  BorderColor #F9A825
+  FontSize 10
+}
+
+skinparam activity {
+  BackgroundColor #EEEEEE
+  BorderColor #757575
+  FontColor #212121
+  ArrowColor #424242
+}
+
+' ---- color key ---------------------------------------------------------------
+' <<blocking>>  : #FFCDD2  red   -- gate fails the job
+' <<warn>>      : #FFF9C4  yellow -- advisory, promotion continues
+' <<main_only>> : #E8EAF6  lavender -- runs only on refs/heads/main
+' <<optional>>  : #F1F8E9  light green -- skipped when token absent
+' <<infra>>     : #E3F2FD  blue  -- infrastructure / setup steps
+' <<output>>    : #E0F7FA  cyan  -- outputs / artifacts
+
+skinparam activity {
+  BackgroundColor<<blocking>> #FFCDD2
+  BorderColor<<blocking>> #C62828
+  FontColor<<blocking>> #212121
+  BackgroundColor<<warn>> #FFF9C4
+  BorderColor<<warn>> #F9A825
+  BackgroundColor<<main_only>> #E8EAF6
+  BorderColor<<main_only>> #3949AB
+  BackgroundColor<<optional>> #F1F8E9
+  BorderColor<<optional>> #558B2F
+  BackgroundColor<<infra>> #E3F2FD
+  BorderColor<<infra>> #1565C0
+  BackgroundColor<<output>> #E0F7FA
+  BorderColor<<output>> #00838F
+}
+
+' =============================================================================
+' INTERFACE DECLARATION (top-level box)
+' =============================================================================
+
+rectangle "workflow_call Interface" as iface #E3F2FD {
+
+  rectangle "Inputs (required)" as inputs_req #BBDEFB {
+    rectangle "image_id\nupstream_registry\nupstream_name\nupstream_tag\nghcr_name\nghcr_tag" as req_in #FFFFFF
+  }
+  rectangle "Inputs (optional)" as inputs_opt #BBDEFB {
+    rectangle "platform [linux/amd64]\nwrite_lock [true]\nrequire_upstream_signature [false]" as opt_in #FFFFFF
+  }
+  rectangle "Secrets (all optional)" as secs #BBDEFB {
+    rectangle "DHI_REGISTRY_USERNAME\nDHI_REGISTRY_TOKEN\nSNYK_TOKEN" as sec_in #FFFFFF
+  }
+  rectangle "Outputs" as outs #B2EBF2 {
+    rectangle "promoted\ntarget_ref\nsource_digest\ntarget_digest" as out_vals #FFFFFF
+  }
+}
+
+note right of iface
+  **Source:**
+  - .github/workflows/publish-approved-image.yml:46-106
+  Called by workflows in this repo only
+  (e.g. uses: ...publish-approved-image.yml@main)
+end note
+
+' =============================================================================
+' JOB: promote (environment: publish)
+' =============================================================================
+
+rectangle "Job: promote\n(runs-on: ubuntu-latest  |  timeout: 30m  |  environment: publish)" as job_promote #F5F5F5 {
+
+  ' ---- infrastructure --------------------------------------------------------
+  rectangle "[1] Install + verify crane (sha256 pin)\nInstall Cosign" as step_install <<infra>> #E3F2FD
+  rectangle "[2] Mask DHI token\nAuth crane + Docker to dhi.io / ghcr.io" as step_auth <<infra>> #E3F2FD
+
+  ' ---- gate 1: resolve digest ------------------------------------------------
+  rectangle "[3] Resolve upstream digest\n(crane digest --platform)\nValidate sha256 shape regex" as step_resolve <<blocking>> #FFCDD2
+
+  ' ---- gate 2: load policy ---------------------------------------------------
+  rectangle "[4] Load scanner policy\n(catalog/policies.yaml via\nscripts/load_scanner_policy.py)\nEmits: snyk_threshold, trivy_severities,\ncosign_required, .trivyignore" as step_policy <<infra>> #E3F2FD
+
+  ' ---- gate 3: upstream cosign check ----------------------------------------
+  rectangle "[5] Upstream Cosign signature check\n(identity_regexp + issuer_regexp from policy)\nBLOCKS if require=true and no valid sig\nWARNS if identity unpinned (regexp '.*')\nWARNS if sig absent and require=false" as step_cosign <<warn>> #FFF9C4
+
+  ' ---- gate 4: crane copy + digest assertion ---------------------------------
+  rectangle "[6] crane copy by digest -> ghcr.io\nassert source_digest == target_digest\nWARNS if upstream is multi-arch index\n(only single platform promoted)" as step_copy <<blocking>> #FFCDD2
+
+  ' ---- gate 5: snyk ----------------------------------------------------------
+  rectangle "[5a] Snyk gate status notice\n(::notice:: + step summary row)" as step_snyk_skip <<optional>> #F1F8E9
+  rectangle "[5b] Snyk CRITICAL/HIGH gate\n(threshold from policy; --severity-threshold)\nSARIF -> Security tab" as step_snyk_block <<blocking>> #FFCDD2
+  rectangle "[5c] Snyk medium warning\n(continue-on-error: true)\nEmits ::warning:: only; never blocks" as step_snyk_warn <<warn>> #FFF9C4
+  rectangle "[5d] Upload Snyk SARIF\n(only if snyk-high.sarif exists)" as step_snyk_sarif <<optional>> #F1F8E9
+
+  ' ---- gate 6: trivy ---------------------------------------------------------
+  rectangle "[7] Trivy CRITICAL/HIGH gate\n(exit-code: 1  --  always required)\nSeverities + .trivyignore from policy\nSARIF -> Security tab" as step_trivy <<blocking>> #FFCDD2
+
+  ' ---- SBOM ------------------------------------------------------------------
+  rectangle "[8a] Syft: Generate CycloneDX SBOM\n(anchore/syft@digest pin)" as step_cdx <<output>> #E0F7FA
+  rectangle "[8b] Syft: Generate SPDX SBOM\n(anchore/syft@digest pin)" as step_spdx <<output>> #E0F7FA
+  rectangle "[8c] Upload SBOM artifacts\n(retention: 90 days)" as step_sbom_up <<output>> #E0F7FA
+
+  ' ---- signing (main only) ---------------------------------------------------
+  rectangle "[9a] cosign sign (keyless OIDC)" as step_sign <<main_only>> #E8EAF6
+  rectangle "[9b] cosign attest CycloneDX SBOM" as step_attest <<main_only>> #E8EAF6
+  rectangle "[9c] GitHub build-provenance attestation\n(actions/attest-build-provenance)" as step_prov <<main_only>> #E8EAF6
+
+  ' ---- outputs ---------------------------------------------------------------
+  rectangle "[10] Set job outputs\n(promoted=true, target_ref,\nsource_digest, target_digest)" as step_outputs <<output>> #E0F7FA
+}
+
+' =============================================================================
+' JOB: update-lock (needs: promote)
+' =============================================================================
+
+rectangle "Job: update-lock\n(runs-on: ubuntu-latest  |  timeout: 5m)\nCondition: write_lock && promoted=='true' && ref==main" as job_lock #E8F5E9 {
+  rectangle "[1] Checkout (fetch-depth 0)\nConfigure git bot identity" as lock_checkout <<infra>> #E3F2FD
+  rectangle "[2] Conflict-safe retry loop (max 5 attempts)\ngit pull --rebase origin main\npython3 scripts/update_approved_lock.py\ngit commit '[skip ci]'\ngit push origin HEAD:main\nBackoff: attempt*2s on push conflict" as lock_update #C8E6C9
+}
+
+note right of job_lock
+  **SANCTIONED direct-push-to-main exception**
+  Only commits catalog/approved-lock.yaml
+  with [skip ci]; gated on successful promote.
+  Source: publish-approved-image.yml:576-651
+end note
+
+' =============================================================================
+' LEGEND
+' =============================================================================
+
+legend right
+  **Color Legend**
+  |= Color |= Meaning |
+  |<#FFCDD2> BLOCKING | Gate fails the job; image not published |
+  |<#FFF9C4> WARN-ONLY | Advisory; promotion continues |
+  |<#E8EAF6> MAIN-ONLY | Runs only on refs/heads/main |
+  |<#F1F8E9> OPTIONAL | Skipped when SNYK_TOKEN is absent |
+  |<#E3F2FD> INFRA | Setup / credential / policy steps |
+  |<#E0F7FA> OUTPUT | SBOM artifacts and job outputs |
+  |<#E8F5E9> LOCK JOB | update-lock job (separate from promote) |
+
+  **External Systems**
+  - dhi.io (upstream hardened image registry)
+  - ghcr.io (GHCR publication target)
+  - Sigstore / Rekor (Cosign OIDC signing)
+  - Snyk API (optional scanner)
+endlegend
+
+' =============================================================================
+' EXTERNAL SYSTEMS
+' =============================================================================
+
+rectangle "dhi.io\n(upstream registry)" as ext_dhi #E0E0E0
+rectangle "ghcr.io\n(GHCR target)" as ext_ghcr #E0E0E0
+rectangle "Sigstore / Rekor\n(OIDC signing)" as ext_sig #E0E0E0
+rectangle "Snyk API\n(optional)" as ext_snyk #E0E0E0
+
+' =============================================================================
+' FLOW (top-level arrows)
+' =============================================================================
+
+iface --> job_promote : "workflow_call triggers promote job"
+job_promote --> job_lock : "needs: promote\n(conditional: write_lock && promoted && main)"
+
+step_install --> step_auth
+step_auth --> step_resolve
+step_resolve --> step_policy
+step_policy --> step_cosign
+step_cosign --> step_copy
+step_copy --> step_snyk_skip : "if SNYK_TOKEN absent"
+step_copy --> step_snyk_block : "if SNYK_TOKEN present"
+step_snyk_skip --> step_trivy
+step_snyk_block --> step_snyk_warn
+step_snyk_warn --> step_snyk_sarif
+step_snyk_sarif --> step_trivy
+step_trivy --> step_cdx
+step_cdx --> step_spdx
+step_spdx --> step_sbom_up
+step_sbom_up --> step_sign : "if ref == main"
+step_sbom_up --> step_outputs : "if ref != main (skip signing)"
+step_sign --> step_attest
+step_attest --> step_prov
+step_prov --> step_outputs
+
+lock_checkout --> lock_update
+
+ext_dhi --> step_resolve : "crane digest"
+step_copy --> ext_ghcr : "crane copy"
+step_sign --> ext_sig : "OIDC keyless sign"
+ext_snyk --> step_snyk_block : "Snyk API scan"
+
+@enduml
