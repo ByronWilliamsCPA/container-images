@@ -79,7 +79,12 @@ jobs:
       platform: linux/amd64
       lock_file: catalog/approved-lock.yaml
       write_lock: true
-      grype_fail_on: high
+      # Mirror posture: block only on CRITICAL. We mirror upstream and cannot
+      # patch OS packages ourselves, and DHI images carry unfixed HIGH/MEDIUM/LOW
+      # CVEs (e.g. CVE-2026-54371 in libattr1) with no remediation path at mirror
+      # time. HIGH and below still surface as Grype SARIF for review; CRITICAL
+      # fails closed before publish.
+      grype_fail_on: critical
       sign: true
     secrets:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
