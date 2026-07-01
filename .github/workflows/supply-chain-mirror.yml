@@ -56,13 +56,15 @@ on:
 # #VERIFY Before editing this file or bumping the pinned reusable-workflow SHA,
 #   re-read both called workflows and confirm their jobs still request only this
 #   permission union (over-granting here widens the caller token's blast radius):
-#   contents: write       update-lock commit to the canonical approved-lock
+#   contents: write       update-lock commit on the lock-update branch
+#   pull-requests: write  update-lock opens + auto-merges the lock PR
 #   packages: write       crane push to GHCR
 #   id-token: write       cosign keyless signing + attestation
 #   attestations: write   GitHub build provenance
 #   security-events: write  Grype SARIF upload
 permissions:
   contents: write
+  pull-requests: write
   packages: write
   id-token: write
   attestations: write
