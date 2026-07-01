@@ -19,6 +19,20 @@ from pathlib import Path
 import yaml
 
 
+class _IndentedDumper(yaml.Dumper):
+    """Dumper that indents block sequences under their parent key.
+
+    PyYAML's default emitter places ``-`` items at the parent key's indent
+    (indentless), which yamllint's ``indent-sequences: true`` rule rejects
+    (``wrong indentation: expected 2 but found 0``). Forcing ``indentless`` off
+    makes the emitted lock file match the repo's YAML style, so the generated
+    entry passes the YAML Lint / Security Gate checks on its own promotion PR.
+    """
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False):  # noqa: FBT001, FBT002
+        return super().increase_indent(flow, False)
+
+
 def _resolve_lock_path(lock_file: str) -> Path:
     """Resolve lock_file and confirm it stays inside the current working tree.
 
@@ -120,7 +134,13 @@ def main() -> int:
     tmp_path = lock_path.with_suffix(lock_path.suffix + ".tmp")
     with tmp_path.open("w") as fh:
         yaml.dump(
-            data, fh, default_flow_style=False, sort_keys=False, allow_unicode=True
+            data,
+            fh,
+            Dumper=_IndentedDumper,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+            indent=2,
         )
     tmp_path.replace(lock_path)
 
