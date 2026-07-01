@@ -1,27 +1,18 @@
 apiVersion: v1
 kind: ApprovedImageLock
-
 metadata:
-  schema_version: "1.0"
-  description: >
-    Digest-pinned lock file for images successfully promoted to GHCR.
-    Populated by the A3 promotion pipeline; validated by downstream
-    consumers (homelab-infra B1/B2 workflows) to verify image provenance.
+  schema_version: '1.0'
+  description: 'Digest-pinned lock file for images successfully promoted to GHCR.
+    Populated by the A3 promotion pipeline; validated by downstream consumers (homelab-infra
+    B1/B2 workflows) to verify image provenance.
+
+    '
   maintainer: ByronWilliamsCPA/container-images
-  last_updated: "placeholder-populated-by-a3-pipeline"
-
-# A3 will populate this file during promotion runs.
-# Each entry records the source digest resolved at copy time and the
-# target digest verified after crane copy, which must be equal.
-# Downstream consumers compare compose image references against ghcr_ref
-# to determine whether an image has cleared the promotion pipeline.
-
-# Schema per entry (A3 will enforce this):
-#   id:            str    -- matches catalog/images.yaml id
-#   ghcr_ref:      str    -- fully-qualified GHCR reference (name + tag, no digest)
-#   source_digest: str    -- sha256 digest resolved from upstream at promotion time
-#   target_digest: str    -- sha256 digest of the GHCR copy (must equal source_digest)
-#   promoted_at:   str    -- ISO-8601 UTC timestamp
-#   promoted_by:   str    -- GitHub Actions run URL
-
-promoted: []
+  last_updated: '2026-07-01T03:25:00Z'
+promoted:
+- id: distroless-static
+  ghcr_ref: ghcr.io/byronwilliamscpa/distroless-static:latest
+  source_digest: sha256:7d14daf425206f9e79b463e57226c1d6500a6b42f4923d5f0a9a413657f5774f
+  target_digest: sha256:4d52ef30b64eb8400ade379926ac15249f7441554e5a6889b6cc5f710b6a9f56
+  promoted_at: '2026-07-01T03:25:00Z'
+  promoted_by: https://github.com/ByronWilliamsCPA/container-images/actions/runs/28491241399
