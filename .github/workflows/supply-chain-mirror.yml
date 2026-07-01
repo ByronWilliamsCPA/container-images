@@ -71,7 +71,7 @@ permissions:
 jobs:
   verify:
     name: Verify upstream (distroless-static)
-    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-mirror-verify.yml@5825ec597cb87f66efcc471f7f2d9fd47e5dcf14
+    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-mirror-verify.yml@1502ecdde74ba30e2db1c91778f98b550bcf100e
     with:
       upstream_registry: gcr.io
       upstream_name: distroless/static-debian12
@@ -85,7 +85,7 @@ jobs:
   promote:
     name: Promote to GHCR (scan -> publish -> sign -> lock)
     needs: verify
-    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-promote-core.yml@5825ec597cb87f66efcc471f7f2d9fd47e5dcf14
+    uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-promote-core.yml@1502ecdde74ba30e2db1c91778f98b550bcf100e
     with:
       image_id: distroless-static
       source_kind: registry
