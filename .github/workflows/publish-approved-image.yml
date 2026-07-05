@@ -427,7 +427,7 @@ jobs:
       # the upload so a missing-file error does not mask the real Snyk failure.
       - name: Upload Snyk SARIF to Security tab
         if: always() && env.SNYK_TOKEN != '' && hashFiles('snyk-high.sarif') != ''
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
         with:
           sarif_file: snyk-high.sarif
           category: snyk-${{ inputs.image_id }}
@@ -449,7 +449,7 @@ jobs:
 
       - name: Upload Trivy SARIF to Security tab
         if: always() && hashFiles('trivy-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
         with:
           sarif_file: trivy-results.sarif
           category: trivy-${{ inputs.image_id }}
