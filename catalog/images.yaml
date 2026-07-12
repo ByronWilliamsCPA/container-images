@@ -5,7 +5,7 @@ metadata:
   schema_version: "1.0"
   description: Approved container image catalog for homelab infrastructure
   maintainer: ByronWilliamsCPA/container-images
-  last_updated: "2026-06-27"
+  last_updated: "2026-07-11"
 
 # Each entry defines one image family version.
 # Fields:
@@ -290,6 +290,32 @@ images:
     platform_compatibility:
       default: linux/amd64
       supported: [linux/amd64]
+
+  - id: dhi-traefik-37
+    display_name: "DHI Traefik 3.7"
+    source_tier: primary
+    criticality: critical
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: traefik
+      # #ASSUME: DHI publishes traefik 3.7 under the same <minor>-debian13 tag
+      # convention as 3.5/3.6; not verifiable locally (dhi.io requires
+      # entitlement credentials held only by the mirror workflow).
+      # #VERIFY: the mirror workflow resolves dhi.io/traefik:3.7-debian13; if
+      # the tag is absent the matrix job for this entry fails loudly
+      # (fail-fast off).
+      tag: "3.7-debian13"
+    ghcr:
+      name: dhi-traefik
+      tag: "3.7-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Latest Traefik; control-plane proxy, changing requires immediate drift scan"
 
   - id: dhi-traefik-36
     display_name: "DHI Traefik 3.6"
