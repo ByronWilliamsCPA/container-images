@@ -5,7 +5,7 @@ metadata:
   schema_version: "1.0"
   description: Approved container image catalog for homelab infrastructure
   maintainer: ByronWilliamsCPA/container-images
-  last_updated: "2026-07-11"
+  last_updated: "2026-07-18"
 
 # Each entry defines one image family version.
 # Fields:
@@ -167,6 +167,57 @@ images:
       default: linux/amd64
       supported: [linux/amd64]
     notes: "Builder-stage base with shell and apt; pair with dhi-python:3.12-debian13 as runtime stage."
+
+  - id: dhi-python-314
+    display_name: "DHI Python 3.14"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: python
+      # #ASSUME: DHI publishes python 3.14 under the same <major>.<minor>-debian13
+      # tag convention as 3.12/3.11; not verifiable locally (dhi.io requires
+      # entitlement credentials held only by the mirror workflow). Python 3.14
+      # itself went stable 2025-10-07 (PEP 745), so an upstream build should exist.
+      # #VERIFY: the mirror workflow resolves dhi.io/python:3.14-debian13; if
+      # the tag is absent the matrix job for this entry fails loudly (fail-fast off).
+      tag: "3.14-debian13"
+    ghcr:
+      name: dhi-python
+      tag: "3.14-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Latest stable Python; onboard for services ready to move off 3.12/3.11"
+
+  - id: dhi-python-313
+    display_name: "DHI Python 3.13"
+    source_tier: primary
+    criticality: high
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: dhi.io
+      name: python
+      # #ASSUME: DHI publishes python 3.13 under the same <major>.<minor>-debian13
+      # tag convention as 3.12/3.11; not verifiable locally (dhi.io requires
+      # entitlement credentials held only by the mirror workflow).
+      # #VERIFY: the mirror workflow resolves dhi.io/python:3.13-debian13; if
+      # the tag is absent the matrix job for this entry fails loudly (fail-fast off).
+      tag: "3.13-debian13"
+    ghcr:
+      name: dhi-python
+      tag: "3.13-debian13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: "Bridge Python version between 3.12 and 3.14"
 
   - id: dhi-python-311
     display_name: "DHI Python 3.11"
