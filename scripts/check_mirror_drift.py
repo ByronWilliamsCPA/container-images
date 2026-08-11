@@ -27,7 +27,9 @@ Exits 1 if any drift is found, 0 if the mirror is current.
 
 from __future__ import annotations
 
-import subprocess
+import re
+import shutil
+import subprocess  # nosec B404 - crane is the repo's registry client (see run_crane)
 import sys
 from pathlib import Path
 
@@ -40,6 +42,16 @@ except ImportError:
 CATALOG_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("catalog/images.yaml")
 GHCR_OWNER = "byronwilliamscpa"
 CRANE_TIMEOUT = 120
+
+# Every crane argument this script builds is either a literal subcommand/flag
+# or an image reference assembled from catalog fields. Catalog values arrive
+# from a YAML file that any PR can edit, so they are validated against this
+# pattern before reaching the process boundary rather than trusted outright.
+SAFE_ARG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]*$")
+
+
+class UnsafeArgumentError(ValueError):
+    """A crane argument failed allowlist validation and was not executed."""
 
 
 def is_artifact_tag(tag: str) -> bool:
@@ -64,15 +76,55 @@ def diff_tags(declared: set[str], published: set[str]) -> tuple[list[str], list[
     return missing, orphans
 
 
-def crane(args: list[str]) -> str | None:
-    """Run crane and return stdout, or None if the command failed."""
+def validate_args(args: list[str]) -> list[str]:
+    """Return args unchanged, or raise if any value is not allowlist-clean.
+
+    Flags are passed through; everything else must match SAFE_ARG. This keeps
+    shell metacharacters, whitespace, and leading dashes out of the argument
+    vector even though no shell is involved.
+    """
+    for arg in args:
+        if arg.startswith("--"):
+            continue
+        if not SAFE_ARG.fullmatch(arg):
+            raise UnsafeArgumentError(
+                f"refusing to pass unsafe crane argument: {arg!r}"
+            )
+    return args
+
+
+def resolve_crane() -> str:
+    """Absolute path to the crane binary, so PATH order cannot redirect us."""
+    path = shutil.which("crane")
+    if path is None:
+        print(
+            "ERROR: crane not found on PATH. Install it from "
+            "https://github.com/google/go-containerregistry/releases",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return path
+
+
+def run_crane(args: list[str]) -> str | None:
+    """Run crane and return stdout, or None if the command failed.
+
+    Safe by construction: the executable is resolved to an absolute path, no
+    shell is used, and every argument is allowlist-validated first.
+    """
     try:
-        result = subprocess.run(
-            ["crane", *args],
+        checked = validate_args(args)
+    except UnsafeArgumentError as exc:
+        print(f"  ! {exc}", file=sys.stderr)
+        return None
+    try:
+        result = subprocess.run(  # nosec B603 - absolute path, no shell, args validated
+            [resolve_crane(), *checked],
             capture_output=True,
             text=True,
             timeout=CRANE_TIMEOUT,
             check=False,
+            shell=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"  ! crane {' '.join(args)}: {exc}", file=sys.stderr)
@@ -119,8 +171,10 @@ def check_pins(entries: list[dict]) -> list[tuple]:
     """
     drifted = []
     for entry in (e for e in entries if e["pin"]):
-        index = crane(["digest", entry["source"]])
-        platform = crane(["digest", entry["source"], "--platform", entry["platform"]])
+        index = run_crane(["digest", entry["source"]])
+        platform = run_crane(
+            ["digest", entry["source"], "--platform", entry["platform"]]
+        )
         resolved = {d for d in (index, platform) if d}
         if resolved and entry["pin"] not in resolved:
             drifted.append((entry["id"], entry["pin"], sorted(resolved)))
@@ -131,8 +185,8 @@ def check_staleness(entries: list[dict]) -> tuple[list[tuple], list[str]]:
     """Compare each entry's upstream platform digest against the mirror's."""
     stale, unchecked = [], []
     for entry in entries:
-        source = crane(["digest", entry["source"], "--platform", entry["platform"]])
-        target = crane(["digest", entry["target"]])
+        source = run_crane(["digest", entry["source"], "--platform", entry["platform"]])
+        target = run_crane(["digest", entry["target"]])
         if source is None or target is None:
             unchecked.append(entry["id"])
             continue
@@ -149,7 +203,7 @@ def check_coverage(entries: list[dict]) -> tuple[list[str], list[str]]:
 
     missing_all, orphans_all = [], []
     for name, tags in sorted(declared.items()):
-        listing = crane(["ls", f"ghcr.io/{GHCR_OWNER}/{name}"])
+        listing = run_crane(["ls", f"ghcr.io/{GHCR_OWNER}/{name}"])
         if listing is None:
             continue
         published = {t for t in listing.splitlines() if t}
