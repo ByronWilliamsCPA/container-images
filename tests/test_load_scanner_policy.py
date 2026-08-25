@@ -69,6 +69,7 @@ def test_trivy_severities_highest_first() -> None:
 
 
 def test_trivy_ignore_unfixed_only_true_enables() -> None:
+    """Only a real YAML boolean true turns the mirror gate's unfixed filter on."""
     assert lsp._trivy_ignore_unfixed({"ignore_unfixed": True}) == "true"
     assert lsp._trivy_ignore_unfixed({"ignore_unfixed": False}) == "false"
 
@@ -194,6 +195,7 @@ def test_main_emits_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 def test_main_emits_ignore_unfixed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The flag reaches GITHUB_OUTPUT so both workflows' Trivy steps can read it."""
     policy = _default_policy()
     policy["scanner_policy"]["trivy"]["ignore_unfixed"] = True
     rc, outputs, _ = _run_main(tmp_path, monkeypatch, policy)

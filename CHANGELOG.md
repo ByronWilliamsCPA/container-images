@@ -20,7 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is transport and cannot patch a package, so an unfixable finding is
   unactionable here, while a fixable one means upstream shipped a build that lags
   an available patch. Measured over the live catalog on 2026-08-25, this leaves
-  22 of 33 images clean and 11 blocked on genuinely actionable findings, ending a
+  22 of 33 images unblocked (NOT clean: they still carry unfixable CRITICAL and
+  HIGH findings, which are reported but not gated) and 11 blocked, ending a
   streak in which every scheduled run since 2026-06-28 failed and a new CRITICAL
   would have been indistinguishable from the noise. Unfixed findings are still
   scanned and still uploaded as SARIF.

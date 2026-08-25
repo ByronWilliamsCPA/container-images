@@ -185,8 +185,16 @@ Migrating an entry onto the `supply-chain-mirror` path requires it to clear
 **both** gates on that path: `promote-core`'s `grype_fail_on: critical`, and
 `mirror-verify`'s fail-closed signer check.
 
-Six DHI entries clear the *scanner* half today - no glibc (so not caught by
-CVE-2026-5450, see blocker 1) and zero fixable CRITICAL/HIGH:
+**These are Trivy measurements against a Grype gate, so read them as a
+shortlist, not a verdict.** `promote-core` gates on Grype, and blocker 1 is the
+proof that the two scanners disagree: Grype rates CVE-2026-5450 CRITICAL from
+NVD while Trivy rates it MEDIUM from Debian's own severity. An entry below can
+still fail the real gate on a finding Grype scores higher than Trivy does.
+Confirm with an actual Grype run before migrating any entry; the criteria used
+here (no glibc, zero fixable CRITICAL/HIGH) only narrow the field cheaply.
+
+Six DHI entries clear the *scanner* half on that basis - no glibc (so not caught
+by CVE-2026-5450, see blocker 1) and zero fixable CRITICAL/HIGH:
 
 - `dhi-traefik-36`, `dhi-traefik-37`
 - `dhi-node-exporter-1`, `dhi-postgres-exporter-0`, `dhi-redis-exporter-1`
@@ -201,8 +209,12 @@ signature.
 
 `distroless-python3` and `distroless-nodejs20` have a *verifiable* signer (same
 distroless identity, already confirmed) but carry 18 and 6 fixable CRITICAL/HIGH
-findings respectively, so they fail the scanner half. They migrate when
-upstream rebuilds.
+findings respectively, so they fail the scanner half on any reading. They
+migrate when upstream rebuilds.
+
+Note also that "unblocked" is not "clean" anywhere in this document: an entry
+with zero *fixable* CRITICAL/HIGH can still carry many unfixable ones. The
+readiness table's first column is the honest count.
 
 ## Blockers
 
