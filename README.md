@@ -114,9 +114,15 @@ mutable tag and moves on any run that passes.
 > window are unsigned: there is no `.sig` tag and no OCI referrer, and a
 > `cosign verify` against this org's identity will fail. That is expected.
 >
-> **Exception:** `distroless-static:latest` is published by the
-> `supply-chain-mirror` path, which verifies the upstream distroless signer
-> fail-closed before promoting. It is signed and SBOM-attested.
+> **This includes `distroless-static:latest`.** The `supply-chain-mirror` path
+> that publishes it is now configured to verify the upstream distroless signer
+> fail-closed and to sign and attest, but it has not yet run on `main` under
+> that configuration, so the digest currently on that tag is unsigned too.
+> Verified against the registry on 2026-08-25: `cosign verify` reports
+> `no signatures found` and the referrers API returns `MANIFEST_UNKNOWN`.
+> Treat the whole namespace as unsigned until `docs/rt1-signing-exit.md` says
+> otherwise, and confirm by querying the registry rather than by reading a
+> green workflow run.
 >
 > **Next review: 2026-11-24.** The migration plan, per-entry readiness, and the
 > three blockers are in [`docs/rt1-signing-exit.md`](docs/rt1-signing-exit.md).

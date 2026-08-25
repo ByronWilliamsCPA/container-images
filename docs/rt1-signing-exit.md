@@ -4,8 +4,24 @@
 
 | Path | Upstream identity verified? | Our signature + SBOM attestation? |
 | --- | --- | --- |
-| `supply-chain-mirror.yml` (distroless-static) | **yes**, fail-closed | **yes** |
+| `supply-chain-mirror.yml` (distroless-static) | configured, **not yet run** | **no** - nothing published by this path is signed today |
 | `mirror-hardened-images.yml` (all 33 catalog entries) | no | **no** (`MIRROR_SIGNING_ENABLED=false`) |
+
+**Nothing in this org's GHCR namespace is signed as of 2026-08-25.** Verified
+against the registry, not against a run's green check:
+
+```
+$ crane digest ghcr.io/byronwilliamscpa/distroless-static:latest
+sha256:6d635b323e6ab633016668144d38e368e2894bd824500369151573225078ee03
+$ cosign verify --certificate-identity-regexp '.*' \
+    --certificate-oidc-issuer-regexp '.*' \
+    ghcr.io/byronwilliamscpa/distroless-static@sha256:6d635b32...
+Error: no signatures found
+$ curl .../v2/byronwilliamscpa/distroless-static/referrers/sha256:6d635b32...
+{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}
+```
+
+`catalog/approved-lock.yaml` is likewise still `promoted: []`.
 
 **Next review: 2026-11-24.** Review earlier if either trigger below fires.
 
@@ -38,14 +54,94 @@ per-platform digest carry a signature, which matters because `mirror-verify`
 resolves a platform digest (`crane digest --platform`) and verifies *that* ref -
 an index-only signature would have failed closed on the first real run.
 
-`distroless-static` is therefore the first image in this org published with a
-verified upstream identity, our own signature, and an SBOM attestation.
+This is configuration, not yet a published outcome. See "Why the green run
+lied" below: `distroless-static` is published but **unsigned**, and the run that
+published it reported success while signing nothing. `distroless-static` becomes
+the first image in this org with a verified upstream identity, our own
+signature, and an SBOM attestation only after a successful run of this path
+**on `main`** under the new setting - and the way to confirm that is to query
+the registry for the `.sig` tag and the referrers API, not to read a green
+check.
+
+## Why the green run lied
+
+Every signing and lock step in the shared `supply-chain-promote-core.yml` is
+gated on the ref:
+
+```yaml
+- name: Sign image with Cosign
+  if: inputs.sign && github.ref == 'refs/heads/main'
+- name: Attest CycloneDX SBOM
+  if: inputs.sign && github.ref == 'refs/heads/main'
+- name: GitHub build provenance attestation
+  if: inputs.sign && github.ref == 'refs/heads/main'
+
+update-lock:
+  if: inputs.write_lock && needs.publish.outputs.promoted == 'true'
+      && github.ref == 'refs/heads/main'
+```
+
+`supply-chain-mirror.yml` is `workflow_dispatch`-only, so a dispatch from a
+feature branch produces a **fully green run that publishes to GHCR and signs
+nothing**. The skip is silent: `if:` false is not a warning.
+
+That is exactly what happened. Run
+[28477177390](https://github.com/ByronWilliamsCPA/container-images/actions/runs/28477177390)
+(2026-06-30) reports `success` and was dispatched from
+`feat/supply-chain-bake-distroless-static`. It pushed
+`sha256:6d635b32...` to GHCR, skipped all three signing steps and the
+`update-lock` job, and the path has not run since. For two months the run list
+said "the bake worked".
+
+A pipeline that publishes unsigned and a pipeline that never ran look identical
+from the run list. Two guards in `supply-chain-mirror.yml` now close that:
+
+- **`preflight`** fails the run when `sign`/`write_lock` are requested from a
+  non-`main` ref, naming the steps that would silently skip. Dispatching from a
+  branch to exercise the verify and scan halves is still supported, but it must
+  be declared with the `allow_unsigned_dry_run` input - the operator opts into
+  an unsigned run rather than discovering one.
+- **`verify-published`** runs after promotion on `main` and asserts against the
+  **registry** that a signature and an SBOM attestation actually exist for the
+  published digest. A green run can no longer mean "signed" unless the artifact
+  says so.
+
+Neither guard can be added to the shared reusable workflow from this repo, so
+both live in the caller. If the ref gates in `promote-core` are ever relaxed,
+`verify-published` still holds, because it checks the artifact rather than the
+condition.
 
 ## Per-entry readiness
 
 Measured 2026-08-25 with Trivy 0.70.0 against the live GHCR content of every
 catalog entry. "fixable" counts findings that have a fixed version available
 upstream - the ones the promotion gate acts on.
+
+**Method matters, and this table is reproducible.** Trivy resolves an image
+through the local container daemon before the registry, so a stale local copy
+carrying an old digest under the same tag yields a different, wrong answer for
+what looks like the same command. These numbers were produced in an environment
+with no container daemon, so every scan went to the registry. To reproduce, pin
+the resolution explicitly - by digest, or by tag with `--image-src remote`:
+
+```
+trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+  --image-src remote ghcr.io/byronwilliamscpa/<name>:<tag>
+```
+
+A number obtained without one of those is not comparable to this table.
+
+**Why `ignore_unfixed` and not a per-CVE exception list.** This is the
+load-bearing justification for the gate policy, so it belongs here rather than
+only in `catalog/policies.yaml`. Of the 81 CRITICAL/HIGH findings on
+`dhi-python:3.14-debian13`, about 70 are attributed to `linux-libc-dev` -
+Debian's kernel *headers* package. It ships no runtime code, a container uses
+the host kernel regardless, Trivy attributes every kernel CVE to it, and none of
+them carry a fix. Enumerating those as dated exceptions would mean ~79 entries
+for one image, each needing renewal, to express a fact that is true of every
+Debian-based image in the catalog. `ignore_unfixed` states the actual policy in
+one place: a transport mirror gates on what upstream has fixed and it has not
+shipped.
 
 | id | tier | CRIT+HIGH | fixable | CRIT | fixable CRIT | glibc |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -178,8 +274,10 @@ unsigned and carries no SBOM attestation.** There is no `.sig` tag and no OCI
 referrer for these digests; a `cosign verify` against this org's identity will
 fail, and that failure is expected, not a compromise indicator.
 
-`ghcr.io/byronwilliamscpa/distroless-static:latest` is the exception - it is
-published by the `supply-chain-mirror` path and is signed and attested.
+`ghcr.io/byronwilliamscpa/distroless-static:latest` is published by the
+`supply-chain-mirror` path, which is designed to sign and attest - but it has
+not yet done so. That digest is unsigned today too. Treat the whole namespace as
+unsigned until this document says otherwise.
 
 Pin by digest regardless. The mirror's promotion gate means a mutable tag now
 stops advancing when the scan finds something actionable, but a tag is still a

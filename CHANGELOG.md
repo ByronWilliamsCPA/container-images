@@ -24,10 +24,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   streak in which every scheduled run since 2026-06-28 failed and a new CRITICAL
   would have been indistinguishable from the noise. Unfixed findings are still
   scanned and still uploaded as SARIF.
-- The mirror now reads its thresholds, ignore-unfixed flag and CVE exceptions
-  from `catalog/policies.yaml` via `scripts/load_scanner_policy.py`, the same
-  path `publish-approved-image.yml` uses, so the two pipelines cannot drift on
-  what "blocking" means.
+- Both promotion paths now read their thresholds, ignore-unfixed flag and CVE
+  exceptions from `catalog/policies.yaml` via `scripts/load_scanner_policy.py`.
+  `publish-approved-image.yml` also honours `ignore_unfixed`, so the unattended
+  mirror and the human-approved promotion cannot apply different gates to the
+  same catalog entry.
 
 ### Fixed
 
@@ -58,16 +59,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
-- Close RT-1 for the distroless mirror path. `supply-chain-mirror.yml` now runs
-  with `require_upstream_signature: true` and the distroless signer pinned
-  (`keyless@distroless.iam.gserviceaccount.com` via `https://accounts.google.com`,
-  confirmed 2026-08-25 against `static-debian12`, `python3-debian12` and
-  `nodejs20-debian12`; both the index and per-platform digests are signed, which
-  matters because `mirror-verify` verifies a platform digest).
-  `distroless-static:latest` is now the first image in this org published with a
-  verified upstream identity, our own signature, and an SBOM attestation. The DHI
-  half of the catalog stays in the interim window: `dhi.io` needs entitlement
-  credentials to read a signature, so the DHI signer identity is still unknown.
+- Configure fail-closed upstream-identity verification on the distroless mirror
+  path. `supply-chain-mirror.yml` now sets `require_upstream_signature: true`
+  with the distroless signer pinned (`keyless@distroless.iam.gserviceaccount.com`
+  via `https://accounts.google.com`, confirmed 2026-08-25 against
+  `static-debian12`, `python3-debian12` and `nodejs20-debian12`; both the index
+  and per-platform digests are signed, which matters because `mirror-verify`
+  verifies a platform digest). This is configuration, not yet a published
+  outcome: RT-1 closes for this path only after a successful run on `main`.
+  Nothing in the GHCR namespace is signed today, `distroless-static:latest`
+  included. The DHI half of the catalog stays in the interim window: `dhi.io`
+  needs entitlement credentials to read a signature, so the DHI signer identity
+  is still unknown.
+- Refuse a `supply-chain-mirror` run that would publish without signing.
+  `promote-core` gates cosign signing, SBOM attestation, build provenance and
+  the lock update on `github.ref == 'refs/heads/main'`, and this caller is
+  `workflow_dispatch`-only, so a dispatch from a branch published to GHCR and
+  skipped all four while still reporting success. Run 28477177390 (2026-06-30)
+  did exactly that: green, dispatched from a feature branch, `distroless-static`
+  published unsigned, `approved-lock.yaml` left empty, and the state believed
+  good for two months. A `preflight` job now fails such a dispatch unless
+  `allow_unsigned_dry_run` is set, and a `verify-published` job asserts against
+  the **registry** that a signature and CycloneDX attestation exist for the
+  promoted digest, so a green run can no longer stand in for a signed artifact.
 - Stop minting cosign signatures and SBOM attestations in the live mirror until
   upstream-identity verification exists (RT-1 interim, ADR-012). A
   `MIRROR_SIGNING_ENABLED` kill-switch (default `false`) gates all four Sign/Attest
