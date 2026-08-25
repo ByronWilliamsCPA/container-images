@@ -6,8 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The mirror's Trivy scan now gates promotion instead of trailing it
+  (RT-4). `mirror-hardened-images.yml` resolves the upstream digest, scans that
+  digest, and runs `crane copy` only if the scan passes. Previously the copy ran
+  first, so a failing scan reported failure while the public mutable tag had
+  already advanced: the run read as a gate and behaved as a report. Scanning the
+  upstream digest rather than a staging tag keeps the copy content-addressed, so
+  no unvetted bytes reach GHCR and there is nothing to stage or clean up.
+- The mirror gate blocks only on findings that have a fix available upstream
+  (`scanner_policy.trivy.ignore_unfixed` in `catalog/policies.yaml`). This mirror
+  is transport and cannot patch a package, so an unfixable finding is
+  unactionable here, while a fixable one means upstream shipped a build that lags
+  an available patch. Measured over the live catalog on 2026-08-25, this leaves
+  22 of 33 images unblocked (NOT clean: they still carry unfixable CRITICAL and
+  HIGH findings, which are reported but not gated) and 11 blocked, ending a
+  streak in which every scheduled run since 2026-06-28 failed and a new CRITICAL
+  would have been indistinguishable from the noise. Unfixed findings are still
+  scanned and still uploaded as SARIF.
+- Both promotion paths now read their thresholds, ignore-unfixed flag and CVE
+  exceptions from `catalog/policies.yaml` via `scripts/load_scanner_policy.py`.
+  `publish-approved-image.yml` also honours `ignore_unfixed`, so the unattended
+  mirror and the human-approved promotion cannot apply different gates to the
+  same catalog entry.
+
+### Fixed
+
+- Give each mirror matrix leg its own SARIF category
+  (`trivy-${{ matrix.id }}`). Every leg previously uploaded to the same default
+  category, so the 33 legs overwrote each other's alerts and only the
+  last-finishing job's findings survived in the Security tab.
+- Surface the blocking CVEs in the mirror job log and step summary. The gate now
+  runs in table format, so a failed run names the packages and fixed versions
+  instead of leaving the reason visible only in the Security tab.
+- Emit a `::warning::` annotation for each exception dropped as expired or
+  malformed. Expiry was already fail-safe (a lapsed exception reverts to
+  blocking) but invisible, so a run would go red on a CVE someone believed was
+  still covered.
+
 ### Added
 
+- `docs/rt1-signing-exit.md`: the RT-1 exit plan. Per-entry migration readiness
+  for all 33 catalog entries, the three blockers holding the DHI half of the
+  catalog on the legacy path, the sequence for retiring
+  `mirror-hardened-images.yml`, and a **2026-11-24 review date** so downstream
+  consumers can plan around unsigned images rather than discover them.
 - A3 approved-lock provenance validator (`scripts/verify_approved_lock.py`),
   wired into the required Validate Catalog Schema gate. It verifies every
   promotion entry in `catalog/approved-lock.yaml`: schema conformance, the
@@ -16,6 +60,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- Configure fail-closed upstream-identity verification on the distroless mirror
+  path. `supply-chain-mirror.yml` now sets `require_upstream_signature: true`
+  with the distroless signer pinned (`keyless@distroless.iam.gserviceaccount.com`
+  via `https://accounts.google.com`, confirmed 2026-08-25 against
+  `static-debian12`, `python3-debian12` and `nodejs20-debian12`; both the index
+  and per-platform digests are signed, which matters because `mirror-verify`
+  verifies a platform digest). This is configuration, not yet a published
+  outcome: RT-1 closes for this path only after a successful run on `main`.
+  Nothing in the GHCR namespace is signed today, `distroless-static:latest`
+  included. The DHI half of the catalog stays in the interim window: `dhi.io`
+  needs entitlement credentials to read a signature, so the DHI signer identity
+  is still unknown.
+- Refuse a `supply-chain-mirror` run that would publish without signing.
+  `promote-core` gates cosign signing, SBOM attestation, build provenance and
+  the lock update on `github.ref == 'refs/heads/main'`, and this caller is
+  `workflow_dispatch`-only, so a dispatch from a branch published to GHCR and
+  skipped all four while still reporting success. Run 28477177390 (2026-06-30)
+  did exactly that: green, dispatched from a feature branch, `distroless-static`
+  published unsigned, `approved-lock.yaml` left empty, and the state believed
+  good for two months. A `preflight` job now fails such a dispatch unless
+  `allow_unsigned_dry_run` is set, and a `verify-published` job asserts against
+  the **registry** that a signature and CycloneDX attestation exist for the
+  promoted digest, so a green run can no longer stand in for a signed artifact.
 - Stop minting cosign signatures and SBOM attestations in the live mirror until
   upstream-identity verification exists (RT-1 interim, ADR-012). A
   `MIRROR_SIGNING_ENABLED` kill-switch (default `false`) gates all four Sign/Attest

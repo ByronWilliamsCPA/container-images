@@ -28,15 +28,23 @@
 # passed. Both reusable workflows fall back to an anonymous pull when the
 # UPSTREAM_REGISTRY_* / DHI_REGISTRY_* secrets are absent.
 #
-# BAKE POSTURE (deliberate, time-boxed):
-#   require_upstream_signature is false for now. mirror-verify still resolves and
-#   pins the exact upstream digest and promote-core still scans-before-publish
-#   and signs OUR attestation, which is strictly stronger than the legacy mirror.
-#   #ASSUME the distroless project publishes a Fulcio-verifiable cosign signature
-#   we can pin.
-#   #VERIFY confirm the real distroless signer identity + issuer, then flip
-#   require_upstream_signature to true with expected_identity_regexp /
-#   expected_issuer_regexp set, to fully close RT-1 for the mirror path.
+# RT-1 POSTURE: CLOSED for this (distroless) path as of 2026-08-25.
+#   require_upstream_signature is true and the signer is pinned below, so an
+#   upstream image whose signature does not verify against the distroless
+#   project's own Fulcio identity is refused before any copy. Combined with
+#   promote-core's scan-before-publish, nothing this caller publishes is bytes
+#   whose upstream signer went unverified -- which is the exact condition the
+#   legacy mirror's MIRROR_SIGNING_ENABLED=false kill-switch waits on.
+#
+#   Identity confirmed 2026-08-25 by running `cosign verify` against
+#   gcr.io/distroless/static-debian12, python3-debian12 and nodejs20-debian12:
+#   all three are signed by keyless@distroless.iam.gserviceaccount.com via
+#   https://accounts.google.com. Both the index digest and the per-platform
+#   digest carry a signature, which matters because mirror-verify resolves a
+#   platform digest (crane digest --platform) and verifies THAT ref.
+#
+#   The DHI half of the catalog is NOT closed. See docs/rt1-signing-exit.md for
+#   the per-entry migration plan, the blockers, and the review date.
 #
 # This is workflow_dispatch-only and additive: it does NOT retire
 # mirror-hardened-images.yml. Retirement + a catalog-driven matrix over all
@@ -50,43 +58,128 @@ name: Supply Chain Mirror (bake)
 
 on:
   workflow_dispatch:
+    inputs:
+      allow_unsigned_dry_run:
+        description: >
+          Acknowledge that a run from a non-main ref publishes to GHCR WITHOUT
+          signing, attesting, or updating the lock. Required to dispatch this
+          workflow off main.
+        required: false
+        type: boolean
+        default: false
 
+# Deny by default at workflow level; each job requests only what it needs
+# (sonar githubactions:S8233). A workflow-level union would hand the preflight
+# and verify jobs write scopes they have no use for, widening the caller
+# token's blast radius across every job in the run.
+#
 # #ASSUME The called reusable workflows declare their own per-job permissions,
-#   capped by what this caller grants; the grant below is the union they need.
-# #VERIFY Before editing this file or bumping the pinned reusable-workflow SHA,
-#   re-read both called workflows and confirm their jobs still request only this
-#   permission union (over-granting here widens the caller token's blast radius):
-#   contents: write       update-lock commit on the lock-update branch
-#   pull-requests: write  update-lock opens + auto-merges the lock PR
-#   packages: write       crane push to GHCR
-#   id-token: write       cosign keyless signing + attestation
-#   attestations: write   GitHub build provenance
-#   security-events: write  Grype SARIF upload
-permissions:
-  contents: write
-  pull-requests: write
-  packages: write
-  id-token: write
-  attestations: write
-  security-events: write
+#   capped by what the calling job grants.
+# #VERIFY Before bumping the pinned reusable-workflow SHA, re-read both called
+#   workflows and confirm their jobs still request no more than the grants on
+#   the `verify` and `promote` jobs below. Confirmed at
+#   d5cf99101d4150ae5832d154cb42993705a09e31:
+#     mirror-verify  verify      contents: read
+#     promote-core   scan        contents: read, security-events: write
+#     promote-core   publish     contents: read, packages: write,
+#                                id-token: write, attestations: write
+#     promote-core   update-lock contents: write, pull-requests: write
+permissions: {}
 
 jobs:
+  # ===========================================================================
+  # Preflight: refuse a silently-unsigned run
+  # ===========================================================================
+  # promote-core gates Sign / Attest / provenance / update-lock on
+  # `github.ref == 'refs/heads/main'`. This caller is workflow_dispatch-only, so
+  # a dispatch from a branch publishes to GHCR and skips all four WITHOUT
+  # failing: run 28477177390 reported success on 2026-06-30, pushed an unsigned
+  # distroless-static, and left approved-lock.yaml empty. Nothing said so.
+  #
+  # A publish-without-signing run and a never-ran path are indistinguishable
+  # from the run list, so make the operator declare the intent instead.
+  preflight:
+    name: Preflight (signing reachable?)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Refuse an unacknowledged unsigned run
+        env:
+          REF: ${{ github.ref }}
+          ACK: ${{ inputs.allow_unsigned_dry_run }}
+        run: |
+          if [ "${REF}" = "refs/heads/main" ]; then
+            echo "On main: signing, attestation and lock update are reachable."
+            exit 0
+          fi
+          if [ "${ACK}" = "true" ]; then
+            echo "::warning::DRY RUN from ${REF}. promote-core will publish to" \
+              "GHCR but SKIP cosign sign, SBOM attestation, build provenance" \
+              "and update-lock. A green result here does NOT validate the" \
+              "signing path. Verify against the registry, never the run status."
+            exit 0
+          fi
+          echo "::error::Refusing to dispatch from ${REF}: promote-core gates" \
+            "cosign sign, SBOM attestation, build provenance and update-lock on" \
+            "refs/heads/main, so this run would publish to GHCR and sign" \
+            "NOTHING, while still reporting success."
+          echo "::error::Dispatch from main to actually sign, or re-dispatch" \
+            "with allow_unsigned_dry_run=true to acknowledge an unsigned run."
+          exit 1
+
   verify:
     name: Verify upstream (distroless-static)
+    needs: preflight
+    # Resolves a digest and runs `cosign verify`. Reads only; publishes nothing.
+    permissions:
+      contents: read
     uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-mirror-verify.yml@d5cf99101d4150ae5832d154cb42993705a09e31
     with:
       upstream_registry: gcr.io
       upstream_name: distroless/static-debian12
       upstream_tag: "latest"
       platform: linux/amd64
-      # Bake: resolve + pin the digest now; graduate to a fail-closed signer
-      # check once the distroless Fulcio identity is confirmed (see header
-      # #VERIFY). gcr.io is public, so no upstream credentials are supplied.
-      require_upstream_signature: false
+      # Fail-closed: mirror-verify refuses to run with require_upstream_signature
+      # true and an empty or '.*' identity, so these two must stay pinned and
+      # anchored. gcr.io is public, so no upstream credentials are supplied.
+      #
+      # #ASSUME the distroless project keeps signing releases as
+      # keyless@distroless.iam.gserviceaccount.com via accounts.google.com.
+      # #VERIFY if this job starts failing at the verify stage, re-read the real
+      #   identity before widening the regexp:
+      #   `cosign verify --certificate-identity-regexp '.*' \
+      #      --certificate-oidc-issuer-regexp '.*' \
+      #      gcr.io/distroless/static-debian12:latest`
+      #   and check the .optional.Subject / .optional.Issuer fields. A signer
+      #   rotation is a trust event: confirm it against the distroless project's
+      #   own release documentation before pinning the new value.
+      require_upstream_signature: true
+      expected_identity_regexp: '^keyless@distroless\.iam\.gserviceaccount\.com$'
+      expected_issuer_regexp: '^https://accounts\.google\.com$'
 
   promote:
     name: Promote to GHCR (scan -> publish -> sign -> lock)
     needs: verify
+    # The union promote-core's three jobs need, and nothing else:
+    #   contents: write       update-lock commit on the lock-update branch
+    #   pull-requests: write  update-lock opens + auto-merges the lock PR
+    #   packages: write       crane push to GHCR
+    #   id-token: write       cosign keyless signing + attestation
+    #   attestations: write   GitHub build provenance
+    #   security-events: write  Grype SARIF upload
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
     uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-promote-core.yml@d5cf99101d4150ae5832d154cb42993705a09e31
     with:
       image_id: distroless-static
@@ -106,3 +199,134 @@ jobs:
       # gcr.io distroless is anonymous: no UPSTREAM_REGISTRY_* creds. SNYK_TOKEN
       # still drives the optional second scan in promote-core.
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  # ===========================================================================
+  # Verify the ARTIFACT, not the run status
+  # ===========================================================================
+  # promote-core reporting success is not evidence that anything was signed: its
+  # signing steps are `if:`-gated, and a skipped step is a green step. This job
+  # asks the registry instead, so "the run was green" can never again stand in
+  # for "the image is signed".
+  #
+  # Only meaningful on main, where the signing steps are reachable at all; a
+  # dry run from a branch is expected to publish unsigned and has already been
+  # acknowledged in preflight.
+  verify-published:
+    name: Verify published artifact is signed
+    needs: [preflight, promote]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+
+      # Authenticate before verifying. Without this the check relies on GHCR's
+      # anonymous pull working; a package flipped private, or a registry hiccup,
+      # would surface as a verification failure and read as "unsigned".
+      - name: Authenticate cosign to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "${GHCR_PASS}" | \
+            cosign login ghcr.io --username "${GHCR_USER}" --password-stdin
+
+      - name: Assert signature and SBOM attestation exist on the registry
+        env:
+          TARGET_REF: ${{ needs.promote.outputs.target_ref }}
+          TARGET_DIGEST: ${{ needs.promote.outputs.target_digest }}
+          # Pin the ISSUER exactly and the identity to this org's namespace. A
+          # signature from any other issuer, or from outside ByronWilliamsCPA,
+          # is not ours and must not satisfy this check. The workflow path and
+          # ref inside the identity are deliberately not pinned so that bumping
+          # the pinned reusable-workflow SHA does not silently fail this gate.
+          EXPECT_IDENTITY: '^https://github\.com/ByronWilliamsCPA/'
+          EXPECT_ISSUER: '^https://token\.actions\.githubusercontent\.com$'
+        run: |
+          if [ -z "${TARGET_DIGEST}" ]; then
+            echo "::error::promote-core reported success but published no" \
+              "digest. Nothing to verify, which is itself the failure."
+            exit 1
+          fi
+
+          # target_ref carries the tag; re-address by digest so this verifies
+          # the exact manifest that was promoted, not whatever the tag holds now.
+          REPO="${TARGET_REF%:*}"
+          SUBJECT="${REPO}@${TARGET_DIGEST}"
+          echo "Verifying ${SUBJECT}"
+
+          FAILED=0
+
+          # Only cosign's explicit "no signatures found" proves absence. Any
+          # other failure (auth, network, an unreadable manifest) means the
+          # check could not reach a verdict, and reporting that as UNSIGNED
+          # would be the same kind of confident-but-wrong claim this job exists
+          # to prevent. Both outcomes still fail the run: fail-closed either
+          # way, but say which one it is.
+          classify() {
+            case "$1" in
+              *"no signatures found"*|*"no matching signatures"*|\
+              *"no matching attestations"*) echo "absent" ;;
+              *) echo "inconclusive" ;;
+            esac
+          }
+
+          if OUT=$(cosign verify \
+              --certificate-identity-regexp="${EXPECT_IDENTITY}" \
+              --certificate-oidc-issuer-regexp="${EXPECT_ISSUER}" \
+              "${SUBJECT}" 2>&1); then
+            echo "Signature verified."
+          elif [ "$(classify "${OUT}")" = "absent" ]; then
+            echo "::error::${SUBJECT} is published and UNSIGNED. promote-core" \
+              "reported success, so its signing step was skipped (see the" \
+              "refs/heads/main gate) or its signature does not match this" \
+              "org's Actions identity."
+            FAILED=1
+          else
+            echo "::error::Signature verification INCONCLUSIVE for ${SUBJECT}:" \
+              "cosign could not complete the check, so this is NOT evidence" \
+              "the image is unsigned. Fix the access problem and re-run."
+            echo "${OUT}"
+            FAILED=1
+          fi
+
+          if OUT=$(cosign verify-attestation \
+              --type cyclonedx \
+              --certificate-identity-regexp="${EXPECT_IDENTITY}" \
+              --certificate-oidc-issuer-regexp="${EXPECT_ISSUER}" \
+              "${SUBJECT}" 2>&1); then
+            echo "CycloneDX SBOM attestation verified."
+          elif [ "$(classify "${OUT}")" = "absent" ]; then
+            echo "::error::${SUBJECT} has NO CycloneDX SBOM attestation."
+            FAILED=1
+          else
+            echo "::error::Attestation verification INCONCLUSIVE for" \
+              "${SUBJECT}; this is NOT evidence the attestation is missing."
+            echo "${OUT}"
+            FAILED=1
+          fi
+
+          {
+            echo "### Published artifact verification"
+            echo ""
+            echo "- Subject: \`${SUBJECT}\`"
+            if [ "${FAILED}" = "0" ]; then
+              echo "- Signature: present and verified"
+              echo "- CycloneDX SBOM attestation: present and verified"
+            else
+              echo "- **FAILED** - see the error annotations above."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          exit "${FAILED}"

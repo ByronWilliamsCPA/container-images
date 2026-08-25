@@ -30,6 +30,33 @@ scanner_policy:
     medium: record
     low: ignore
 
+    # Block only on findings that have a fix available upstream.
+    #
+    # This mirror is TRANSPORT: `crane copy` moves upstream bytes unchanged
+    # (every catalog entry is disposition: mirror_only), so the pipeline cannot
+    # patch a package. That makes an unfixable finding unactionable here: the
+    # only choices are "publish anyway" or "publish nothing, ever". A finding
+    # that DOES have a fix is actionable -- it means upstream shipped a build
+    # that lags an available patch, and holding the tag is the right response.
+    #
+    # Measured on the live catalog (33 images, Trivy 0.70.0, 2026-08-25):
+    # 22 images carry zero fixable CRITICAL/HIGH; 11 carry at least one and
+    # stay blocked. The libuuid1 regression that prompted this change is the
+    # worked example -- dhi-python:3.14-debian13 @sha256:5bbd41ae carried
+    # CVE-2026-53612/53613/53614/53615 WITH a fix (2.41.5-0+deb13u1), so it
+    # blocks; @sha256:11466a15 ships that fix and passes.
+    #
+    # This is not a blanket suppression: unfixed findings are still scanned,
+    # still uploaded as SARIF, and still visible in the Security tab. They
+    # simply do not gate a pipeline that has no way to act on them.
+    #
+    # #ASSUME the scanner's "fixed version" field is a reliable signal that an
+    # upstream patch exists for the detected distro release.
+    # #VERIFY when a finding must block despite having no fix, that is a policy
+    #   decision, not a scanner one: raise it here (e.g. flip this to false for
+    #   a hard freeze) rather than editing the workflow.
+    ignore_unfixed: true
+
   # Upstream Cosign signature check (dhi.io or gcr.io source images).
   # Set required: true only after confirming the upstream registry uses Cosign.
   #
@@ -37,10 +64,26 @@ scanner_policy:
   # the upstream image. The default ".*" accepts any Sigstore identity, which
   # only proves a signature exists, not that the trusted publisher produced it;
   # the workflow emits a warning whenever the identity is left unpinned.
-  # #ASSUME the upstream signer identity is unknown until confirmed per source.
-  # #VERIFY inspect an upstream signature with
-  #   `cosign verify --certificate-identity-regexp ... <ref>` and replace ".*"
-  #   with the publisher's Fulcio identity + OIDC issuer before relying on it.
+  # Confirmed signer identities (verify before adding a new source tier):
+  #   gcr.io/distroless/*  identity keyless@distroless.iam.gserviceaccount.com
+  #                        issuer   https://accounts.google.com
+  #                        (confirmed 2026-08-25 on static-debian12,
+  #                        python3-debian12 and nodejs20-debian12; both the
+  #                        index digest and the per-platform digest are signed)
+  #   dhi.io/*             UNKNOWN -- dhi.io requires entitlement credentials to
+  #                        read a signature, so it cannot be confirmed outside a
+  #                        workflow run. See docs/rt1-signing-exit.md.
+  #
+  # These stay unpinned HERE because this block is global: a single regexp pair
+  # applies to whichever image publish-approved-image.yml is promoting, so
+  # pinning the distroless signer would fail every DHI promotion. Per-source
+  # pinning happens at the caller (see .github/workflows/supply-chain-mirror.yml).
+  #
+  # #ASSUME the DHI signer identity stays unknown until a workflow run with
+  #   entitlement credentials inspects one.
+  # #VERIFY run the mirror-verify workflow against a dhi.io ref with
+  #   require_upstream_signature: false and read the cosign output, then record
+  #   the identity + issuer here and in docs/rt1-signing-exit.md.
   upstream_cosign:
     required: false
     advisory: true

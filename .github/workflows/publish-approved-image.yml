@@ -445,6 +445,11 @@ jobs:
           output: trivy-results.sarif
           exit-code: '1'
           severity: ${{ steps.policy.outputs.trivy_severities }}
+          # Same policy knob the mirror gate reads. Both paths promote upstream
+          # bytes unchanged, so both must agree on what "blocking" means; if
+          # only one honours this, the unattended mirror and the human-approved
+          # promotion silently apply different gates to the same catalog.
+          ignore-unfixed: ${{ steps.policy.outputs.trivy_ignore_unfixed }}
           trivyignores: ${{ steps.policy.outputs.trivyignore_file }}
 
       - name: Upload Trivy SARIF to Security tab
