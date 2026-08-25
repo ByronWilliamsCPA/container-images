@@ -66,6 +66,19 @@ def test_append_new_entry(lockfile: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert data["promoted"][0]["target_digest"] == DIGEST_A
 
 
+def test_promoted_sequence_indented_two_spaces(
+    lockfile: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # yamllint's indent-sequences rule rejects block sequences emitted at the
+    # parent key's indent (the PyYAML default). The custom dumper must indent
+    # each entry by two spaces so the generated lock passes YAML Lint on its
+    # own promotion PR.
+    assert _run(monkeypatch, _argv()) == 0
+    text = lockfile.read_text()
+    assert "promoted:\n  - id:" in text
+    assert "\n- id:" not in text
+
+
 def test_idempotent_update_in_place(
     lockfile: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
