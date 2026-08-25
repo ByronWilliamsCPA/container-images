@@ -68,6 +68,21 @@ def test_trivy_severities_highest_first() -> None:
     )
 
 
+def test_trivy_ignore_unfixed_only_true_enables() -> None:
+    assert lsp._trivy_ignore_unfixed({"ignore_unfixed": True}) == "true"
+    assert lsp._trivy_ignore_unfixed({"ignore_unfixed": False}) == "false"
+
+
+def test_trivy_ignore_unfixed_fails_safe_on_junk() -> None:
+    """Absent or non-boolean values must gate on MORE, never less."""
+    assert lsp._trivy_ignore_unfixed({}) == "false"
+    # A YAML author writing `ignore_unfixed: "true"` gets the safe answer, not
+    # a silently-enabled suppression from a truthy string.
+    assert lsp._trivy_ignore_unfixed({"ignore_unfixed": "true"}) == "false"
+    assert lsp._trivy_ignore_unfixed({"ignore_unfixed": 1}) == "false"
+    assert lsp._trivy_ignore_unfixed({"ignore_unfixed": None}) == "false"
+
+
 def test_parse_expiry() -> None:
     assert lsp._parse_expiry("2026-12-31") == date(2026, 12, 31)
     assert lsp._parse_expiry("not-a-date") is None
@@ -172,7 +187,20 @@ def test_main_emits_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert outputs["cosign_required"] == "false"
     assert outputs["cosign_identity_pinned"] == "false"
     assert outputs["trivy_exception_count"] == "0"
+    assert outputs["trivy_ignore_unfixed"] == "false"
     assert trivyignore.exists()
+
+
+def test_main_emits_ignore_unfixed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = _default_policy()
+    policy["scanner_policy"]["trivy"]["ignore_unfixed"] = True
+    rc, outputs, _ = _run_main(tmp_path, monkeypatch, policy)
+    assert rc == 0
+    assert outputs["trivy_ignore_unfixed"] == "true"
+    # The flag must not disturb the severity list it travels with.
+    assert outputs["trivy_severities"] == "CRITICAL,HIGH"
 
 
 def test_main_pinned_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,6 +231,49 @@ def test_main_writes_trivyignore_from_exceptions(
     assert rc == 0
     assert outputs["trivy_exception_count"] == "1"
     assert "CVE-2026-1" in trivyignore.read_text()
+
+
+def test_expired_exception_is_annotated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A lapsed exception reverts to blocking; say so where a human will see it.
+
+    Silent fail-safe is correct but invisible: the run just goes red on a CVE
+    someone believed was covered. The annotation names the lapsed entry.
+    """
+    policy = _default_policy()
+    policy["exceptions"] = [
+        {
+            "image_id": "dhi-postgres-16",
+            "cve_id": "CVE-2020-1",
+            "scanner": "trivy",
+            "expires": "2020-01-01",
+        },
+    ]
+    rc, outputs, trivyignore = _run_main(tmp_path, monkeypatch, policy)
+    assert rc == 0
+    assert outputs["trivy_exception_count"] == "0"
+    assert "CVE-2020-1" not in trivyignore.read_text()
+    captured = capsys.readouterr().out
+    assert "::warning::" in captured
+    assert "CVE-2020-1 (expired)" in captured
+
+
+def test_shipped_policy_declares_ignore_unfixed() -> None:
+    """The mirror gate's behaviour is declared in the catalog, not the workflow.
+
+    Guards the wiring end to end: if this key is dropped or renamed, the gate
+    silently reverts to blocking on unfixable findings and every scheduled run
+    goes red again.
+    """
+    policy_path = Path(__file__).parent.parent / "catalog" / "policies.yaml"
+    with policy_path.open() as fh:
+        policy = yaml.safe_load(fh)
+    trivy = policy["scanner_policy"]["trivy"]
+    assert trivy["ignore_unfixed"] is True
+    assert lsp._trivy_ignore_unfixed(trivy) == "true"
+    # The severity gate itself must not have been widened at the same time.
+    assert lsp._trivy_severities(trivy) == "CRITICAL,HIGH"
 
 
 def test_main_rejects_non_mapping(

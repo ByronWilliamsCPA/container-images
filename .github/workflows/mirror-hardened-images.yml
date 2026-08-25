@@ -10,6 +10,14 @@
 # A1: Uses crane copy by digest (not docker pull/tag/push). The upstream
 #     digest is resolved, then the copy is pinned to that digest, then the
 #     target digest is asserted to match. No TOCTOU gap.
+# RT-4: The Trivy gate runs BEFORE the copy, against the resolved upstream
+#     digest. Promotion is conditional on a clean scan, so a failing run leaves
+#     the last known-good digest on the public mutable tag instead of advancing
+#     it. Scanning the upstream digest (not a staging tag) means no unvetted
+#     bytes ever reach GHCR: the scan and the copy are the same content-
+#     addressed manifest, so there is nothing to stage and nothing to clean up.
+#     Thresholds, the ignore-unfixed flag and CVE exceptions all come from
+#     catalog/policies.yaml -- this workflow hardcodes none of them.
 #
 # Images are available without authentication:
 #   docker pull ghcr.io/byronwilliamscpa/dhi-postgres:16-debian13
@@ -188,9 +196,32 @@ jobs:
           printf '%s' "${GHCR_PASS}" | \
             crane auth login ghcr.io --username "${GHCR_USER}" --password-stdin
 
-      # A1: resolve exact upstream digest, copy content-addressed, assert equality
-      - name: Resolve upstream digest and copy to GHCR
-        id: copy
+      # ---- scanner policy (catalog/policies.yaml is the source of truth) ----
+      # Thresholds, the ignore-unfixed flag and CVE exceptions are declared in
+      # the catalog, not here, so this workflow and publish-approved-image.yml
+      # cannot drift apart on what "blocking" means.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install "pyyaml==6.0.3" --quiet
+
+      - name: Load scanner policy
+        id: policy
+        env:
+          IMAGE_ID: ${{ matrix.id }}
+        run: |
+          python3 scripts/load_scanner_policy.py \
+            --policy-file catalog/policies.yaml \
+            --image-id "${IMAGE_ID}" \
+            --trivyignore-out .trivyignore
+
+      # RT-4: resolve the exact upstream digest. NOTHING is published by this
+      # step -- the copy happens only after the gate below passes.
+      - name: Resolve upstream digest
+        id: resolve
         env:
           UPSTREAM_REGISTRY: ${{ matrix.upstream_registry }}
           UPSTREAM_NAME: ${{ matrix.upstream_name }}
@@ -207,48 +238,141 @@ jobs:
           echo "Source: ${SOURCE}  Platform: ${PLATFORM}"
           echo "Target: ${TARGET}"
 
-          # Resolve the exact platform digest from the upstream registry
+          # The upstream tag is mutable; the digest is not. Everything
+          # downstream (scan, copy, sign) is pinned to this one value.
           SOURCE_DIGEST=$(crane digest "${SOURCE}" --platform "${PLATFORM}")
+
+          # Shape-guard before the value reaches GITHUB_OUTPUT: a registry
+          # returning a newline-bearing value must not be able to smuggle extra
+          # output lines into steps that consume this digest as a scan ref.
+          if ! printf '%s' "${SOURCE_DIGEST}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::Resolved digest has unexpected shape: ${SOURCE_DIGEST}"
+            exit 1
+          fi
           echo "Source digest: ${SOURCE_DIGEST}"
 
-          # Copy content-addressed: upstream tag is mutable; the digest is not
-          crane copy "${SOURCE}@${SOURCE_DIGEST}" "${TARGET}"
+          {
+            echo "source=${SOURCE}"
+            echo "source_ref=${SOURCE}@${SOURCE_DIGEST}"
+            echo "target=${TARGET}"
+            echo "digest=${SOURCE_DIGEST}"
+          } >> "${GITHUB_OUTPUT}"
 
-          # Assert: target must carry the same digest we resolved from source
+      # ---- record: full-severity SARIF for the Security tab -----------------
+      # Deliberately exit-code 0. This step never decides promotion; it exists
+      # so every finding, including the unfixable ones the gate ignores, stays
+      # visible and searchable. The gate below is the single decision point.
+      - name: Scan upstream image with Trivy (SARIF record)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
+        with:
+          image-ref: ${{ steps.resolve.outputs.source_ref }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
+        env:
+          # crane already wrote these to the docker config, but Trivy resolves
+          # registry credentials independently; pass them explicitly so the
+          # pre-publish scan of a dhi.io ref cannot fail on auth.
+          TRIVY_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
+          TRIVY_PASSWORD: ${{ secrets.DHI_REGISTRY_TOKEN }}
+
+      - name: Upload Trivy results to Security tab
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        with:
+          sarif_file: trivy-results.sarif
+          # Without a per-image category every matrix leg writes to the same
+          # SARIF category and the legs overwrite each other's alerts, leaving
+          # only whichever job finished last.
+          category: trivy-${{ matrix.id }}
+
+      # ---- gate: promotion stops here on an actionable finding --------------
+      # Table format (not SARIF) so a failing run names the blocking CVEs in
+      # the job log and step summary instead of only in the Security tab.
+      - name: Trivy promotion gate
+        id: gate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
+        with:
+          image-ref: ${{ steps.resolve.outputs.source_ref }}
+          format: table
+          output: trivy-gate.txt
+          exit-code: '1'
+          severity: ${{ steps.policy.outputs.trivy_severities }}
+          ignore-unfixed: ${{ steps.policy.outputs.trivy_ignore_unfixed }}
+          trivyignores: ${{ steps.policy.outputs.trivyignore_file }}
+        env:
+          # crane already wrote these to the docker config, but Trivy resolves
+          # registry credentials independently; pass them explicitly so the
+          # pre-publish scan of a dhi.io ref cannot fail on auth.
+          TRIVY_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
+          TRIVY_PASSWORD: ${{ secrets.DHI_REGISTRY_TOKEN }}
+
+      - name: Report gate findings
+        if: always() && hashFiles('trivy-gate.txt') != ''
+        env:
+          GATE_RESULT: ${{ steps.gate.outcome }}
+          SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
+          SEVERITIES: ${{ steps.policy.outputs.trivy_severities }}
+          IGNORE_UNFIXED: ${{ steps.policy.outputs.trivy_ignore_unfixed }}
+          EXCEPTIONS: ${{ steps.policy.outputs.trivy_exception_count }}
+        run: |
+          {
+            echo "### Trivy gate: ${GATE_RESULT}"
+            echo ""
+            echo "- Scanned: \`${SOURCE_REF}\`"
+            echo "- Blocking severities: ${SEVERITIES}"
+            echo "- Ignore unfixed: ${IGNORE_UNFIXED}"
+            echo "- Active CVE exceptions: ${EXCEPTIONS}"
+            echo ""
+            echo '```'
+            cat trivy-gate.txt
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${GATE_RESULT}" != "success" ]; then
+            SCOPE="finding(s)"
+            if [ "${IGNORE_UNFIXED}" = "true" ]; then
+              SCOPE="finding(s) with a fix available upstream"
+            fi
+            echo "::error::Promotion blocked: ${SOURCE_REF} has ${SEVERITIES}" \
+              "${SCOPE}. The public tag was NOT advanced; consumers keep the" \
+              "last known-good digest. Findings are listed in the step summary."
+          fi
+
+      # ---- promote: only reached when the gate passed -----------------------
+      - name: Copy verified image to GHCR
+        id: copy
+        env:
+          SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
+          TARGET: ${{ steps.resolve.outputs.target }}
+          SOURCE_DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          # Content-addressed: this is the same manifest the gate just scanned,
+          # so the scan verdict and the published bytes cannot disagree.
+          crane copy "${SOURCE_REF}" "${TARGET}"
+
+          # Assert: target must carry the digest we resolved and scanned.
           TARGET_DIGEST=$(crane digest "${TARGET}")
           if [ "${SOURCE_DIGEST}" != "${TARGET_DIGEST}" ]; then
             echo "::error::Digest mismatch!"
-            echo "::error::  Source: ${SOURCE_DIGEST}"
-            echo "::error::  Target: ${TARGET_DIGEST}"
+            echo "::error::  Scanned: ${SOURCE_DIGEST}"
+            echo "::error::  Target:  ${TARGET_DIGEST}"
             exit 1
           fi
           echo "Digest verified: ${SOURCE_DIGEST}"
 
-          echo "source=${SOURCE}" >> "${GITHUB_OUTPUT}"
-          echo "target=${TARGET}" >> "${GITHUB_OUTPUT}"
-          echo "digest=${TARGET_DIGEST}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "target=${TARGET}"
+            echo "digest=${TARGET_DIGEST}"
+          } >> "${GITHUB_OUTPUT}"
 
-          echo "| Image | \`${TARGET}\` |" >> "${GITHUB_STEP_SUMMARY}"
-          echo "| Source | \`${SOURCE}@${SOURCE_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
-          echo "| Digest | \`${TARGET_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          {
+            echo "| Image | \`${TARGET}\` |"
+            echo "| Source | \`${SOURCE_REF}\` |"
+            echo "| Digest | \`${TARGET_DIGEST}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-
-      - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
-        with:
-          image-ref: ${{ steps.copy.outputs.target }}@${{ steps.copy.outputs.digest }}
-          format: sarif
-          output: trivy-results.sarif
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Upload Trivy results to Security tab
-        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
 
       - name: Generate SBOM with Syft
         id: sbom
@@ -351,8 +475,32 @@ jobs:
           printf '%s' "${GHCR_PASS}" | \
             crane auth login ghcr.io --username "${GHCR_USER}" --password-stdin
 
-      - name: Resolve upstream digest and copy to GHCR
-        id: copy
+      # ---- scanner policy (catalog/policies.yaml is the source of truth) ----
+      # Thresholds, the ignore-unfixed flag and CVE exceptions are declared in
+      # the catalog, not here, so this workflow and publish-approved-image.yml
+      # cannot drift apart on what "blocking" means.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install "pyyaml==6.0.3" --quiet
+
+      - name: Load scanner policy
+        id: policy
+        env:
+          IMAGE_ID: ${{ matrix.id }}
+        run: |
+          python3 scripts/load_scanner_policy.py \
+            --policy-file catalog/policies.yaml \
+            --image-id "${IMAGE_ID}" \
+            --trivyignore-out .trivyignore
+
+      # RT-4: resolve the exact upstream digest. NOTHING is published by this
+      # step -- the copy happens only after the gate below passes.
+      - name: Resolve upstream digest
+        id: resolve
         env:
           UPSTREAM_REGISTRY: ${{ matrix.upstream_registry }}
           UPSTREAM_NAME: ${{ matrix.upstream_name }}
@@ -369,45 +517,129 @@ jobs:
           echo "Source: ${SOURCE}  Platform: ${PLATFORM}"
           echo "Target: ${TARGET}"
 
+          # The upstream tag is mutable; the digest is not. Everything
+          # downstream (scan, copy, sign) is pinned to this one value.
           SOURCE_DIGEST=$(crane digest "${SOURCE}" --platform "${PLATFORM}")
+
+          # Shape-guard before the value reaches GITHUB_OUTPUT: a registry
+          # returning a newline-bearing value must not be able to smuggle extra
+          # output lines into steps that consume this digest as a scan ref.
+          if ! printf '%s' "${SOURCE_DIGEST}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::Resolved digest has unexpected shape: ${SOURCE_DIGEST}"
+            exit 1
+          fi
           echo "Source digest: ${SOURCE_DIGEST}"
 
-          crane copy "${SOURCE}@${SOURCE_DIGEST}" "${TARGET}"
+          {
+            echo "source=${SOURCE}"
+            echo "source_ref=${SOURCE}@${SOURCE_DIGEST}"
+            echo "target=${TARGET}"
+            echo "digest=${SOURCE_DIGEST}"
+          } >> "${GITHUB_OUTPUT}"
 
+      # ---- record: full-severity SARIF for the Security tab -----------------
+      # Deliberately exit-code 0. This step never decides promotion; it exists
+      # so every finding, including the unfixable ones the gate ignores, stays
+      # visible and searchable. The gate below is the single decision point.
+      - name: Scan upstream image with Trivy (SARIF record)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
+        with:
+          image-ref: ${{ steps.resolve.outputs.source_ref }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
+
+      - name: Upload Trivy results to Security tab
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        with:
+          sarif_file: trivy-results.sarif
+          # Without a per-image category every matrix leg writes to the same
+          # SARIF category and the legs overwrite each other's alerts, leaving
+          # only whichever job finished last.
+          category: trivy-${{ matrix.id }}
+
+      # ---- gate: promotion stops here on an actionable finding --------------
+      # Table format (not SARIF) so a failing run names the blocking CVEs in
+      # the job log and step summary instead of only in the Security tab.
+      - name: Trivy promotion gate
+        id: gate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
+        with:
+          image-ref: ${{ steps.resolve.outputs.source_ref }}
+          format: table
+          output: trivy-gate.txt
+          exit-code: '1'
+          severity: ${{ steps.policy.outputs.trivy_severities }}
+          ignore-unfixed: ${{ steps.policy.outputs.trivy_ignore_unfixed }}
+          trivyignores: ${{ steps.policy.outputs.trivyignore_file }}
+
+      - name: Report gate findings
+        if: always() && hashFiles('trivy-gate.txt') != ''
+        env:
+          GATE_RESULT: ${{ steps.gate.outcome }}
+          SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
+          SEVERITIES: ${{ steps.policy.outputs.trivy_severities }}
+          IGNORE_UNFIXED: ${{ steps.policy.outputs.trivy_ignore_unfixed }}
+          EXCEPTIONS: ${{ steps.policy.outputs.trivy_exception_count }}
+        run: |
+          {
+            echo "### Trivy gate: ${GATE_RESULT}"
+            echo ""
+            echo "- Scanned: \`${SOURCE_REF}\`"
+            echo "- Blocking severities: ${SEVERITIES}"
+            echo "- Ignore unfixed: ${IGNORE_UNFIXED}"
+            echo "- Active CVE exceptions: ${EXCEPTIONS}"
+            echo ""
+            echo '```'
+            cat trivy-gate.txt
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${GATE_RESULT}" != "success" ]; then
+            SCOPE="finding(s)"
+            if [ "${IGNORE_UNFIXED}" = "true" ]; then
+              SCOPE="finding(s) with a fix available upstream"
+            fi
+            echo "::error::Promotion blocked: ${SOURCE_REF} has ${SEVERITIES}" \
+              "${SCOPE}. The public tag was NOT advanced; consumers keep the" \
+              "last known-good digest. Findings are listed in the step summary."
+          fi
+
+      # ---- promote: only reached when the gate passed -----------------------
+      - name: Copy verified image to GHCR
+        id: copy
+        env:
+          SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
+          TARGET: ${{ steps.resolve.outputs.target }}
+          SOURCE_DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          # Content-addressed: this is the same manifest the gate just scanned,
+          # so the scan verdict and the published bytes cannot disagree.
+          crane copy "${SOURCE_REF}" "${TARGET}"
+
+          # Assert: target must carry the digest we resolved and scanned.
           TARGET_DIGEST=$(crane digest "${TARGET}")
           if [ "${SOURCE_DIGEST}" != "${TARGET_DIGEST}" ]; then
             echo "::error::Digest mismatch!"
-            echo "::error::  Source: ${SOURCE_DIGEST}"
-            echo "::error::  Target: ${TARGET_DIGEST}"
+            echo "::error::  Scanned: ${SOURCE_DIGEST}"
+            echo "::error::  Target:  ${TARGET_DIGEST}"
             exit 1
           fi
           echo "Digest verified: ${SOURCE_DIGEST}"
 
-          echo "source=${SOURCE}" >> "${GITHUB_OUTPUT}"
-          echo "target=${TARGET}" >> "${GITHUB_OUTPUT}"
-          echo "digest=${TARGET_DIGEST}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "target=${TARGET}"
+            echo "digest=${TARGET_DIGEST}"
+          } >> "${GITHUB_OUTPUT}"
 
-          echo "| Image | \`${TARGET}\` |" >> "${GITHUB_STEP_SUMMARY}"
-          echo "| Source | \`${SOURCE}@${SOURCE_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
-          echo "| Digest | \`${TARGET_DIGEST}\` |" >> "${GITHUB_STEP_SUMMARY}"
+          {
+            echo "| Image | \`${TARGET}\` |"
+            echo "| Source | \`${SOURCE_REF}\` |"
+            echo "| Digest | \`${TARGET_DIGEST}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-
-      - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
-        with:
-          image-ref: ${{ steps.copy.outputs.target }}@${{ steps.copy.outputs.digest }}
-          format: sarif
-          output: trivy-results.sarif
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Upload Trivy results to Security tab
-        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
 
       - name: Generate SBOM with Syft
         id: sbom
@@ -481,6 +713,10 @@ jobs:
           echo "" >> "${GITHUB_STEP_SUMMARY}"
           echo "**Copy method:** crane copy by digest (A1)" >> "${GITHUB_STEP_SUMMARY}"
           echo "**Matrix source:** catalog/images.yaml (A0)" >> "${GITHUB_STEP_SUMMARY}"
+          echo "**Scan gate:** upstream digest scanned BEFORE copy (RT-4); a" \
+            "failing leg leaves the public tag on its previous digest" >> "${GITHUB_STEP_SUMMARY}"
+          echo "**Gate policy:** catalog/policies.yaml (severities, ignore-unfixed," \
+            "CVE exceptions)" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Check for failures
         env:

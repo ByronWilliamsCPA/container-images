@@ -81,13 +81,45 @@ Every DHI image in this mirror carries:
 - SLSA Level 3 provenance (from DHI upstream)
 - AMD64; ARM64 planned
 
-> **Mirror signing is temporarily disabled (RT-1 interim, ADR-012).** This mirror
-> copies a mutable upstream tag, so signing and attesting here would mint this org's
-> keyless identity over bytes whose upstream signer was never verified. CycloneDX
-> SBOM attestation and cosign keyless signing are therefore OFF
-> (`MIRROR_SIGNING_ENABLED=false`) until the shared `mirror-verify` workflow performs
-> fail-closed upstream-identity verification. Images mirrored during this window are
-> unsigned.
+### Scanning gates promotion
+
+The mirror resolves the upstream digest, scans **that digest** with Trivy, and
+copies to GHCR only if the scan passes. A failing run therefore leaves the public
+tag pointing at its previous digest rather than advancing it, and no unvetted
+bytes are ever pushed.
+
+The gate blocks on CRITICAL and HIGH findings **that have a fix available
+upstream**. This mirror is transport - `crane copy` moves upstream bytes
+unchanged and cannot patch a package - so a finding with no fix anywhere is not
+something the pipeline can act on. A finding that does have a fix means upstream
+shipped a build that lags an available patch, and holding the tag is the right
+response. Unfixed findings are still scanned and still uploaded to the Security
+tab; they just do not gate.
+
+Thresholds, that ignore-unfixed rule, and time-boxed per-CVE exceptions all live
+in [`catalog/policies.yaml`](catalog/policies.yaml). Exceptions require a
+justification, a ticket, and an expiry date, and revert to blocking the moment
+they lapse.
+
+**Pin by digest.** A gated tag stops advancing on a bad scan, but it is still a
+mutable tag and moves on any run that passes.
+
+### Signing status
+
+> **Mirror signing is disabled for the images in the tables above (RT-1 interim,
+> ADR-012).** This mirror copies a mutable upstream tag, so signing and attesting
+> here would mint this org's keyless identity over bytes whose upstream signer was
+> never verified. CycloneDX SBOM attestation and cosign keyless signing are
+> therefore OFF (`MIRROR_SIGNING_ENABLED=false`). Images mirrored during this
+> window are unsigned: there is no `.sig` tag and no OCI referrer, and a
+> `cosign verify` against this org's identity will fail. That is expected.
+>
+> **Exception:** `distroless-static:latest` is published by the
+> `supply-chain-mirror` path, which verifies the upstream distroless signer
+> fail-closed before promoting. It is signed and SBOM-attested.
+>
+> **Next review: 2026-11-24.** The migration plan, per-entry readiness, and the
+> three blockers are in [`docs/rt1-signing-exit.md`](docs/rt1-signing-exit.md).
 
 ## Requesting a new image
 

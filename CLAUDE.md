@@ -38,6 +38,8 @@ Active phases:
 | `.github/workflows/mirror-hardened-images.yml` | A1 mirror pipeline: crane digest-copy, Trivy scan, Cosign sign, SBOM attest |
 | `.github/workflows/validate-catalog-schema.yml` | A0 exit gate: schema validator + pytest on every push and PR |
 | `.github/workflows/publish-approved-image.yml` | A2 reusable promotion workflow: full scanner policy pipeline |
+| `.github/workflows/supply-chain-mirror.yml` | Caller for the shared verify-then-promote trust core (RT-1 exit path) |
+| `docs/rt1-signing-exit.md` | RT-1 status, per-entry migration readiness, blockers, review date |
 | `.github/workflows/pr-validation.yml` | Ruff + pytest + pip-audit required PR check |
 | `.github/workflows/security-analysis.yml` | Bandit + yamllint required security gate |
 | `.github/workflows/codeql.yml` | CodeQL SAST (Python), weekly and on PR |
@@ -61,8 +63,19 @@ application logic.
 
 Changes to `.github/workflows/mirror-hardened-images.yml` must preserve:
 - crane digest-copy (not docker pull/push) for reproducible digests
+- the Trivy gate running BEFORE the copy, against the resolved upstream digest
+  (RT-4). Moving the copy ahead of the scan re-opens the window where a failing
+  run still advances the public mutable tag.
+- scanner thresholds, `ignore_unfixed` and CVE exceptions coming from
+  `catalog/policies.yaml` via `load_scanner_policy.py`, never hardcoded here
+- a per-image SARIF `category` on the upload step (matrix legs otherwise
+  overwrite each other's alerts)
 - Cosign signing step
 - SBOM attestation step
+
+RT-1 (mirror signing disabled) has an owner, an exit plan and a review date in
+`docs/rt1-signing-exit.md`. Do not flip `MIRROR_SIGNING_ENABLED` to `true`
+without working that plan; the switch is deliberate.
 
 Changes to `.github/workflows/publish-approved-image.yml` (A2) must also preserve:
 - the `load_scanner_policy.py` step (policy-driven Snyk/Trivy thresholds)

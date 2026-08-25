@@ -8,8 +8,9 @@ emits the concrete knobs each scanner consumes:
 
   * Snyk:  a single ``--severity-threshold`` floor (the lowest blocking
     severity).
-  * Trivy: a comma-separated ``severity`` list of blocking severities, plus a
-    generated ``.trivyignore`` of non-expired CVE exceptions for the image.
+  * Trivy: a comma-separated ``severity`` list of blocking severities, an
+    ``ignore_unfixed`` flag, plus a generated ``.trivyignore`` of non-expired
+    CVE exceptions for the image.
   * Cosign: the ``required`` flag and the certificate identity / issuer
     regexps used to verify the upstream signature.
 
@@ -120,6 +121,15 @@ def _trivy_severities(trivy_cfg: dict[str, str]) -> str:
     """Comma-separated uppercase list of blocking severities, highest-first."""
     blocking = _blocking_severities(trivy_cfg)
     return ",".join(sev.upper() for sev in reversed(blocking))
+
+
+def _trivy_ignore_unfixed(trivy_cfg: dict[str, object]) -> str:
+    """Whether the Trivy gate should ignore findings with no fix available.
+
+    Fail-safe default is ``false``: an absent or non-boolean value gates on
+    every finding, so a malformed policy blocks more, never less.
+    """
+    return "true" if trivy_cfg.get("ignore_unfixed") is True else "false"
 
 
 def _parse_expiry(value: object) -> date | None:
@@ -259,6 +269,7 @@ def _build_outputs(
     return {
         "snyk_threshold": _snyk_threshold(snyk_cfg),
         "trivy_severities": _trivy_severities(trivy_cfg),
+        "trivy_ignore_unfixed": _trivy_ignore_unfixed(trivy_cfg),
         "trivyignore_file": str(trivyignore_path),
         "trivy_exception_count": str(len(trivy_cves)),
         "snyk_exception_cves": ",".join(snyk_cves),
@@ -270,12 +281,22 @@ def _build_outputs(
 
 
 def _print_trace(image_id: str, outputs: dict[str, str], skipped: list[str]) -> None:
-    """Emit a human-readable trace to the job log (stdout, not an output channel)."""
+    """Emit a human-readable trace to the job log (stdout, not an output channel).
+
+    Dropped exceptions are also emitted as ``::warning::`` lines. An exception
+    that has passed its ``expires`` date silently reverts to blocking, which is
+    the correct fail-safe but is invisible in a run that fails for that reason;
+    the annotation makes the lapsed entry visible in the Actions UI so it gets
+    renewed or removed rather than quietly rotting in the policy file.
+    """
     print(f"Scanner policy for {image_id}:")
     for key, value in outputs.items():
         print(f"  {key}={value}")
-    if skipped:
-        print(f"  skipped exceptions (fail-safe, still blocking): {skipped}")
+    for entry in skipped:
+        print(
+            f"::warning::Exception {entry} for image {image_id} was NOT applied; "
+            "the finding still blocks. Renew or remove it in catalog/policies.yaml."
+        )
 
 
 def _parse_args() -> argparse.Namespace:

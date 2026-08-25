@@ -28,15 +28,23 @@
 # passed. Both reusable workflows fall back to an anonymous pull when the
 # UPSTREAM_REGISTRY_* / DHI_REGISTRY_* secrets are absent.
 #
-# BAKE POSTURE (deliberate, time-boxed):
-#   require_upstream_signature is false for now. mirror-verify still resolves and
-#   pins the exact upstream digest and promote-core still scans-before-publish
-#   and signs OUR attestation, which is strictly stronger than the legacy mirror.
-#   #ASSUME the distroless project publishes a Fulcio-verifiable cosign signature
-#   we can pin.
-#   #VERIFY confirm the real distroless signer identity + issuer, then flip
-#   require_upstream_signature to true with expected_identity_regexp /
-#   expected_issuer_regexp set, to fully close RT-1 for the mirror path.
+# RT-1 POSTURE: CLOSED for this (distroless) path as of 2026-08-25.
+#   require_upstream_signature is true and the signer is pinned below, so an
+#   upstream image whose signature does not verify against the distroless
+#   project's own Fulcio identity is refused before any copy. Combined with
+#   promote-core's scan-before-publish, nothing this caller publishes is bytes
+#   whose upstream signer went unverified -- which is the exact condition the
+#   legacy mirror's MIRROR_SIGNING_ENABLED=false kill-switch waits on.
+#
+#   Identity confirmed 2026-08-25 by running `cosign verify` against
+#   gcr.io/distroless/static-debian12, python3-debian12 and nodejs20-debian12:
+#   all three are signed by keyless@distroless.iam.gserviceaccount.com via
+#   https://accounts.google.com. Both the index digest and the per-platform
+#   digest carry a signature, which matters because mirror-verify resolves a
+#   platform digest (crane digest --platform) and verifies THAT ref.
+#
+#   The DHI half of the catalog is NOT closed. See docs/rt1-signing-exit.md for
+#   the per-entry migration plan, the blockers, and the review date.
 #
 # This is workflow_dispatch-only and additive: it does NOT retire
 # mirror-hardened-images.yml. Retirement + a catalog-driven matrix over all
@@ -79,10 +87,23 @@ jobs:
       upstream_name: distroless/static-debian12
       upstream_tag: "latest"
       platform: linux/amd64
-      # Bake: resolve + pin the digest now; graduate to a fail-closed signer
-      # check once the distroless Fulcio identity is confirmed (see header
-      # #VERIFY). gcr.io is public, so no upstream credentials are supplied.
-      require_upstream_signature: false
+      # Fail-closed: mirror-verify refuses to run with require_upstream_signature
+      # true and an empty or '.*' identity, so these two must stay pinned and
+      # anchored. gcr.io is public, so no upstream credentials are supplied.
+      #
+      # #ASSUME the distroless project keeps signing releases as
+      # keyless@distroless.iam.gserviceaccount.com via accounts.google.com.
+      # #VERIFY if this job starts failing at the verify stage, re-read the real
+      #   identity before widening the regexp:
+      #   `cosign verify --certificate-identity-regexp '.*' \
+      #      --certificate-oidc-issuer-regexp '.*' \
+      #      gcr.io/distroless/static-debian12:latest`
+      #   and check the .optional.Subject / .optional.Issuer fields. A signer
+      #   rotation is a trust event: confirm it against the distroless project's
+      #   own release documentation before pinning the new value.
+      require_upstream_signature: true
+      expected_identity_regexp: '^keyless@distroless\.iam\.gserviceaccount\.com$'
+      expected_issuer_regexp: '^https://accounts\.google\.com$'
 
   promote:
     name: Promote to GHCR (scan -> publish -> sign -> lock)
