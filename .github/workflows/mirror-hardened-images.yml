@@ -116,7 +116,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install PyYAML
-        run: pip install "pyyaml==6.0.3" --quiet
+        run: |
+          # --only-binary :all: refuses source distributions, so a compromised
+          # or typo-squatted sdist cannot execute setup.py on the runner
+          # (sonar githubactions:S8541). PyYAML 6.0.3 publishes cp312 wheels.
+          pip install "pyyaml==6.0.3" --only-binary :all: --quiet
 
       - name: Validate catalog schema (exit gate)
         run: python3 scripts/validate_catalog_schema.py catalog/images.yaml
@@ -206,7 +210,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install PyYAML
-        run: pip install "pyyaml==6.0.3" --quiet
+        run: |
+          # --only-binary :all: refuses source distributions, so a compromised
+          # or typo-squatted sdist cannot execute setup.py on the runner
+          # (sonar githubactions:S8541). PyYAML 6.0.3 publishes cp312 wheels.
+          pip install "pyyaml==6.0.3" --only-binary :all: --quiet
 
       - name: Load scanner policy
         id: policy
@@ -485,7 +493,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install PyYAML
-        run: pip install "pyyaml==6.0.3" --quiet
+        run: |
+          # --only-binary :all: refuses source distributions, so a compromised
+          # or typo-squatted sdist cannot execute setup.py on the runner
+          # (sonar githubactions:S8541). PyYAML 6.0.3 publishes cp312 wheels.
+          pip install "pyyaml==6.0.3" --only-binary :all: --quiet
 
       - name: Load scanner policy
         id: policy

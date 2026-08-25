@@ -68,24 +68,23 @@ on:
         type: boolean
         default: false
 
+# Deny by default at workflow level; each job requests only what it needs
+# (sonar githubactions:S8233). A workflow-level union would hand the preflight
+# and verify jobs write scopes they have no use for, widening the caller
+# token's blast radius across every job in the run.
+#
 # #ASSUME The called reusable workflows declare their own per-job permissions,
-#   capped by what this caller grants; the grant below is the union they need.
-# #VERIFY Before editing this file or bumping the pinned reusable-workflow SHA,
-#   re-read both called workflows and confirm their jobs still request only this
-#   permission union (over-granting here widens the caller token's blast radius):
-#   contents: write       update-lock commit on the lock-update branch
-#   pull-requests: write  update-lock opens + auto-merges the lock PR
-#   packages: write       crane push to GHCR
-#   id-token: write       cosign keyless signing + attestation
-#   attestations: write   GitHub build provenance
-#   security-events: write  Grype SARIF upload
-permissions:
-  contents: write
-  pull-requests: write
-  packages: write
-  id-token: write
-  attestations: write
-  security-events: write
+#   capped by what the calling job grants.
+# #VERIFY Before bumping the pinned reusable-workflow SHA, re-read both called
+#   workflows and confirm their jobs still request no more than the grants on
+#   the `verify` and `promote` jobs below. Confirmed at
+#   d5cf99101d4150ae5832d154cb42993705a09e31:
+#     mirror-verify  verify      contents: read
+#     promote-core   scan        contents: read, security-events: write
+#     promote-core   publish     contents: read, packages: write,
+#                                id-token: write, attestations: write
+#     promote-core   update-lock contents: write, pull-requests: write
+permissions: {}
 
 jobs:
   # ===========================================================================
@@ -137,6 +136,9 @@ jobs:
   verify:
     name: Verify upstream (distroless-static)
     needs: preflight
+    # Resolves a digest and runs `cosign verify`. Reads only; publishes nothing.
+    permissions:
+      contents: read
     uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-mirror-verify.yml@d5cf99101d4150ae5832d154cb42993705a09e31
     with:
       upstream_registry: gcr.io
@@ -164,6 +166,20 @@ jobs:
   promote:
     name: Promote to GHCR (scan -> publish -> sign -> lock)
     needs: verify
+    # The union promote-core's three jobs need, and nothing else:
+    #   contents: write       update-lock commit on the lock-update branch
+    #   pull-requests: write  update-lock opens + auto-merges the lock PR
+    #   packages: write       crane push to GHCR
+    #   id-token: write       cosign keyless signing + attestation
+    #   attestations: write   GitHub build provenance
+    #   security-events: write  Grype SARIF upload
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
     uses: ByronWilliamsCPA/.github/.github/workflows/supply-chain-promote-core.yml@d5cf99101d4150ae5832d154cb42993705a09e31
     with:
       image_id: distroless-static
