@@ -10,7 +10,7 @@
 **Nothing in this org's GHCR namespace is signed as of 2026-08-25.** Verified
 against the registry, not against a run's green check:
 
-```
+```console
 $ crane digest ghcr.io/byronwilliamscpa/distroless-static:latest
 sha256:6d635b323e6ab633016668144d38e368e2894bd824500369151573225078ee03
 $ cosign verify --certificate-identity-regexp '.*' \
@@ -124,7 +124,7 @@ what looks like the same command. These numbers were produced in an environment
 with no container daemon, so every scan went to the registry. To reproduce, pin
 the resolution explicitly - by digest, or by tag with `--image-src remote`:
 
-```
+```shell
 trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
   --image-src remote ghcr.io/byronwilliamscpa/<name>:<tag>
 ```

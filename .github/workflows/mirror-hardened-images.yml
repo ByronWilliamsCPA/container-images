@@ -301,6 +301,10 @@ jobs:
         id: gate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
         with:
+          # The SARIF step above already ran setup-trivy in this job, and that
+          # action appends the binary dir to $GITHUB_PATH, which persists across
+          # steps. Re-running setup here would redownload for no gain.
+          skip-setup-trivy: true
           image-ref: ${{ steps.resolve.outputs.source_ref }}
           format: table
           output: trivy-gate.txt
@@ -578,6 +582,10 @@ jobs:
         id: gate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
         with:
+          # The SARIF step above already ran setup-trivy in this job, and that
+          # action appends the binary dir to $GITHUB_PATH, which persists across
+          # steps. Re-running setup here would redownload for no gain.
+          skip-setup-trivy: true
           image-ref: ${{ steps.resolve.outputs.source_ref }}
           format: table
           output: trivy-gate.txt
