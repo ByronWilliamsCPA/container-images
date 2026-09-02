@@ -2,7 +2,9 @@
 # OpenSSF Scorecard
 # =============================================================================
 # Runs the OpenSSF Scorecard on every push to main and on a weekly schedule.
-# Results are uploaded to the GitHub Security tab as SARIF.
+# Results are published to the OpenSSF Scorecard API and uploaded as a
+# workflow artifact (GitHub Advanced Security / Code Security is not active
+# on this repo, so results no longer go to the GitHub Security tab).
 # =============================================================================
 
 name: Scorecard
@@ -25,7 +27,6 @@ jobs:
     timeout-minutes: 10
 
     permissions:
-      security-events: write
       id-token: write
       contents: read
       actions: read
@@ -48,11 +49,6 @@ jobs:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
-
-      - name: Upload Scorecard results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
-        with:
-          sarif_file: results.sarif
 
       - name: Upload Scorecard results as artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

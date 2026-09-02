@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- CodeQL analysis (`.github/workflows/codeql.yml`) and the `dependency-review`
+  workflow (`.github/workflows/dependency-review.yml`). Both depended on
+  GitHub Advanced Security (Code Security), which GitHub now bills separately
+  and which is not enabled on this repository, so neither workflow could
+  produce results.
+- Every `github/codeql-action/upload-sarif` step (in `mirror-hardened-images.yml`,
+  `publish-approved-image.yml`, and `scorecard.yml`). SARIF ingestion into the
+  Security tab requires Advanced Security and no longer functions. Trivy and
+  Snyk SARIF output is now uploaded as a plain workflow artifact instead
+  (`actions/upload-artifact`), so scan findings remain downloadable even though
+  they no longer appear in the Security tab. The Scorecard workflow already
+  uploaded its SARIF as an artifact, so no replacement step was needed there.
+  Actual dependency and code scanning coverage for this repo is Trivy (image
+  scans in the mirror and promotion workflows) and Snyk (container scan in
+  `publish-approved-image.yml`, when `SNYK_TOKEN` is configured); OpenSSF
+  Scorecard continues to publish to the public Scorecard API independent of
+  the Security tab.
+
 ### Changed
 
 - The mirror's Trivy scan now gates promotion instead of trailing it
