@@ -143,7 +143,6 @@ jobs:
       contents: read
       packages: write
       id-token: write  # keyless cosign signing
-      security-events: write  # Trivy SARIF upload
 
     strategy:
       fail-fast: false
@@ -284,15 +283,17 @@ jobs:
           TRIVY_USERNAME: ${{ secrets.DHI_REGISTRY_USERNAME }}
           TRIVY_PASSWORD: ${{ secrets.DHI_REGISTRY_TOKEN }}
 
-      - name: Upload Trivy results to Security tab
-        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+      # GitHub Advanced Security (Code Security) is no longer active for this
+      # repo, so the Security tab no longer ingests SARIF. The scan record is
+      # preserved as a downloadable artifact instead of silently vanishing.
+      - name: Upload Trivy SARIF artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && hashFiles('trivy-results.sarif') != ''
         with:
-          sarif_file: trivy-results.sarif
-          # Without a per-image category every matrix leg writes to the same
-          # SARIF category and the legs overwrite each other's alerts, leaving
-          # only whichever job finished last.
-          category: trivy-${{ matrix.id }}
+          name: trivy-sarif-dhi-${{ matrix.id }}
+          path: trivy-results.sarif
+          retention-days: 90
+          if-no-files-found: warn
 
       # ---- gate: promotion stops here on an actionable finding --------------
       # Table format (not SARIF) so a failing run names the blocking CVEs in
@@ -445,7 +446,6 @@ jobs:
       contents: read
       packages: write
       id-token: write
-      security-events: write  # Trivy SARIF upload
 
     strategy:
       fail-fast: false
@@ -565,15 +565,17 @@ jobs:
           output: trivy-results.sarif
           exit-code: '0'
 
-      - name: Upload Trivy results to Security tab
-        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+      # GitHub Advanced Security (Code Security) is no longer active for this
+      # repo, so the Security tab no longer ingests SARIF. The scan record is
+      # preserved as a downloadable artifact instead of silently vanishing.
+      - name: Upload Trivy SARIF artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && hashFiles('trivy-results.sarif') != ''
         with:
-          sarif_file: trivy-results.sarif
-          # Without a per-image category every matrix leg writes to the same
-          # SARIF category and the legs overwrite each other's alerts, leaving
-          # only whichever job finished last.
-          category: trivy-${{ matrix.id }}
+          name: trivy-sarif-distroless-${{ matrix.id }}
+          path: trivy-results.sarif
+          retention-days: 90
+          if-no-files-found: warn
 
       # ---- gate: promotion stops here on an actionable finding --------------
       # Table format (not SARIF) so a failing run names the blocking CVEs in
