@@ -60,6 +60,18 @@ scanner_policy:
   # Upstream Cosign signature check (dhi.io or gcr.io source images).
   # Set required: true only after confirming the upstream registry uses Cosign.
   #
+  # Consumed only by publish-approved-image.yml. mirror-hardened-images.yml runs
+  # no upstream Cosign check for any tier.
+  #
+  # Vendor-tier images (source_tier: vendor, docker.io) are NOT covered by this
+  # block. Docker Hub application images are mostly unsigned, and no signer
+  # identity has been confirmed for any of them, so there is nothing valid to
+  # pin here. The mirror-vendor job states "upstream signature NOT verified" in
+  # its run summary instead, and keeps vendor signing behind its own switch
+  # (MIRROR_VENDOR_SIGNING_ENABLED). Do not set required: true while vendor
+  # entries are promoted through publish-approved-image.yml: it would block
+  # every one of them.
+  #
   # expected_identity_regexp / expected_issuer_regexp pin WHO must have signed
   # the upstream image. The default ".*" accepts any Sigstore identity, which
   # only proves a signature exists, not that the trusted publisher produced it;

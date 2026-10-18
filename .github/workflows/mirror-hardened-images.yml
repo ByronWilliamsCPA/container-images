@@ -3,7 +3,9 @@
 # Mirror Hardened Container Images to GHCR
 # =============================================================================
 # Mirrors hardened images from upstream registries (dhi.io, gcr.io) to
-# GitHub Container Registry (ghcr.io/byronwilliamscpa/) as public repos.
+# GitHub Container Registry (ghcr.io/byronwilliamscpa/) as public repos, plus
+# third-party vendor application images from Docker Hub (docker.io, ADR-032).
+# The vendor tier is a transport copy pinned by digest: it is not hardened.
 #
 # A0: Matrix is driven by catalog/images.yaml (not hardcoded inline).
 #     Adding an image = one catalog entry.
@@ -23,7 +25,8 @@
 #   docker pull ghcr.io/byronwilliamscpa/dhi-postgres:16-debian13
 #
 # Setup:
-#   Org secrets: DHI_REGISTRY_USERNAME, DHI_REGISTRY_TOKEN
+#   Org secrets: DHI_REGISTRY_USERNAME, DHI_REGISTRY_TOKEN (DHI tier only;
+#   the distroless and vendor tiers pull their sources anonymously)
 #   GitHub Environment: publish (holds DHI token, signing permissions)
 # =============================================================================
 
@@ -77,6 +80,14 @@ env:
   # Copy + Trivy scan + SBOM generation still run while this is "false".
   MIRROR_SIGNING_ENABLED: "false"
 
+  # Additional switch for the vendor tier only. The vendor job signs and
+  # attests only when BOTH this and MIRROR_SIGNING_ENABLED are "true". Docker
+  # Hub vendor images have no upstream signer this pipeline verifies, so
+  # lifting RT-1 for the other tiers must not implicitly start signing them.
+  # Flip to "true" only after a fail-closed upstream verification step exists
+  # for the vendor tier (see the mirror-vendor job).
+  MIRROR_VENDOR_SIGNING_ENABLED: "false"
+
 permissions:
   contents: read
 
@@ -95,8 +106,10 @@ jobs:
     outputs:
       dhi_matrix: ${{ steps.build-matrix.outputs.dhi_matrix }}
       distroless_matrix: ${{ steps.build-matrix.outputs.distroless_matrix }}
+      vendor_matrix: ${{ steps.build-matrix.outputs.vendor_matrix }}
       dhi_count: ${{ steps.build-matrix.outputs.dhi_count }}
       distroless_count: ${{ steps.build-matrix.outputs.distroless_count }}
+      vendor_count: ${{ steps.build-matrix.outputs.vendor_count }}
 
     steps:
       # egress-policy: block deferred pending allowed-endpoints verification (see #18)
@@ -698,11 +711,354 @@ jobs:
             "${TARGET}@${DIGEST}"
 
   # ===========================================================================
+  # Mirror Vendor Images (A1: crane copy by pinned digest, ADR-032)
+  # ===========================================================================
+  # Third-party application images (Supabase self-host stack) from Docker Hub.
+  # Differs from the two jobs above in exactly three ways:
+  #   1. Source is docker.io, pulled anonymously: there is NO dhi.io login.
+  #   2. The copy is pinned to the catalog's upstream.digest (the reviewed
+  #      multi-arch index). The tag is never resolved to decide what to copy;
+  #      it is only compared against the pin to warn about a re-pushed tag.
+  #   3. Signing is behind an additional switch (MIRROR_VENDOR_SIGNING_ENABLED)
+  #      because nothing here verifies the upstream publisher.
+  # The Trivy gate, policy loading, promotion order, SBOM and digest assertion
+  # are identical to the other jobs, and nothing here weakens them.
+  mirror-vendor:
+    name: "Mirror vendor ${{ matrix.ghcr_name }}:${{ matrix.ghcr_tag }}"
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: publish
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.vendor_matrix) }}
+
+    steps:
+      # egress-policy: block deferred pending allowed-endpoints verification (see #18)
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install crane (verify checksum before extraction)
+        run: |
+          CRANE_BASE="https://github.com/google/go-containerregistry/releases/download"
+          CRANE_ASSET="go-containerregistry_Linux_x86_64.tar.gz"
+          curl --fail --show-error --silent --location \
+            "${CRANE_BASE}/v${CRANE_VERSION}/${CRANE_ASSET}" -o crane.tar.gz
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum --check
+          tar xz -C /usr/local/bin crane < crane.tar.gz
+          rm crane.tar.gz
+          crane version
+
+      - name: Mask GitHub token
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "::add-mask::$GH_TOKEN"
+
+      # Docker Hub is read anonymously, so only GHCR needs a login.
+      #
+      # #ASSUME anonymous Docker Hub pulls stay within the rate limit for the
+      #   11 vendor legs (each leg: one crane digest, one crane copy, two
+      #   Trivy pulls). GitHub-hosted runners share egress IPs, so the limit
+      #   is shared with other tenants.
+      # #VERIFY if a leg fails with HTTP 429 / TOOMANYREQUESTS, re-run it, or
+      #   add Docker Hub credentials as org secrets and a `crane auth login
+      #   index.docker.io` step plus TRIVY_USERNAME/TRIVY_PASSWORD env here.
+      - name: Authenticate crane to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "${GHCR_PASS}" | \
+            crane auth login ghcr.io --username "${GHCR_USER}" --password-stdin
+
+      # ---- scanner policy (catalog/policies.yaml is the source of truth) ----
+      # Same loader and same policy as the other jobs: vendor images get no
+      # separate thresholds and no vendor-specific CVE ignores. A finding is
+      # excepted only by an entry in catalog/policies.yaml with a ticket and an
+      # expiry date.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: |
+          # --only-binary :all: refuses source distributions, so a compromised
+          # or typo-squatted sdist cannot execute setup.py on the runner
+          # (sonar githubactions:S8541). PyYAML 6.0.3 publishes cp312 wheels.
+          pip install "pyyaml==6.0.3" --only-binary :all: --quiet
+
+      - name: Load scanner policy
+        id: policy
+        env:
+          IMAGE_ID: ${{ matrix.id }}
+        run: |
+          python3 scripts/load_scanner_policy.py \
+            --policy-file catalog/policies.yaml \
+            --image-id "${IMAGE_ID}" \
+            --trivyignore-out .trivyignore
+
+      # RT-4: confirm the pinned upstream digest. NOTHING is published by this
+      # step -- the copy happens only after the gate below passes.
+      #
+      # The digest comes from the catalog, not from the registry: the bytes
+      # scanned, copied and asserted below are the ones a reviewer pinned in a
+      # PR. A moved tag therefore cannot change what is published.
+      - name: Resolve pinned upstream digest
+        id: resolve
+        env:
+          UPSTREAM_REGISTRY: ${{ matrix.upstream_registry }}
+          UPSTREAM_NAME: ${{ matrix.upstream_name }}
+          UPSTREAM_TAG: ${{ matrix.upstream_tag }}
+          UPSTREAM_DIGEST: ${{ matrix.upstream_digest }}
+          GHCR_NAME: ${{ matrix.ghcr_name }}
+          GHCR_TAG: ${{ matrix.ghcr_tag }}
+          GHCR_OWNER: ${{ github.repository_owner }}
+        run: |
+          GHCR_OWNER=$(echo "${GHCR_OWNER}" | tr '[:upper:]' '[:lower:]')
+          SOURCE="${UPSTREAM_REGISTRY}/${UPSTREAM_NAME}:${UPSTREAM_TAG}"
+          SOURCE_REF="${UPSTREAM_REGISTRY}/${UPSTREAM_NAME}@${UPSTREAM_DIGEST}"
+          TARGET="ghcr.io/${GHCR_OWNER}/${GHCR_NAME}:${GHCR_TAG}"
+
+          echo "Source: ${SOURCE}"
+          echo "Pinned: ${SOURCE_REF}"
+          echo "Target: ${TARGET}"
+
+          # Shape-guard before the value reaches GITHUB_OUTPUT: an empty or
+          # newline-bearing digest must not be able to smuggle extra output
+          # lines into steps that consume it as a scan ref.
+          if ! printf '%s' "${UPSTREAM_DIGEST}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::Catalog digest for ${SOURCE} is missing or malformed: ${UPSTREAM_DIGEST}"
+            exit 1
+          fi
+
+          # The pinned digest must still exist upstream. Fail hard if it does
+          # not; a pin that no longer resolves is not something to paper over.
+          RESOLVED_DIGEST=$(crane digest "${SOURCE_REF}")
+          if [ "${RESOLVED_DIGEST}" != "${UPSTREAM_DIGEST}" ]; then
+            echo "::error::Pinned digest did not resolve to itself!"
+            echo "::error::  Pinned:   ${UPSTREAM_DIGEST}"
+            echo "::error::  Resolved: ${RESOLVED_DIGEST}"
+            exit 1
+          fi
+
+          # Advisory only: if upstream re-pushed the tag, the mirror keeps
+          # serving the reviewed digest. Surface it so the pin is re-reviewed.
+          TAG_DIGEST=$(crane digest "${SOURCE}" 2>/dev/null || true)
+          if [ -z "${TAG_DIGEST}" ]; then
+            echo "::warning::Could not resolve tag ${SOURCE}; mirroring the pinned digest anyway."
+          elif [ "${TAG_DIGEST}" != "${UPSTREAM_DIGEST}" ]; then
+            echo "::warning::Upstream tag ${SOURCE} now points at ${TAG_DIGEST}," \
+              "not the pinned ${UPSTREAM_DIGEST}. Mirroring the pinned digest;" \
+              "re-review and update the catalog pin."
+          fi
+
+          {
+            echo "source=${SOURCE}"
+            echo "source_ref=${SOURCE_REF}"
+            echo "target=${TARGET}"
+            echo "digest=${UPSTREAM_DIGEST}"
+          } >> "${GITHUB_OUTPUT}"
+
+      # Upstream signature handling for the vendor tier, stated explicitly.
+      #
+      # catalog/policies.yaml `upstream_cosign` ("dhi.io or gcr.io source
+      # images") is consumed only by publish-approved-image.yml. This mirror
+      # workflow has never run an upstream Cosign check for any tier, and Docker
+      # Hub vendor images are mostly unsigned, so there is nothing to verify
+      # here. This step records that fact instead of letting the run read as if
+      # the upstream signer had been checked.
+      #
+      # #ASSUME Docker Hub vendor images carry no upstream signature this
+      #   pipeline can verify. Promotion is justified by the PR-reviewed digest
+      #   pin plus the Trivy gate below, NOT by upstream authenticity.
+      # #VERIFY before enabling vendor signing (MIRROR_VENDOR_SIGNING_ENABLED),
+      #   identify each vendor's signer with `cosign tree` / `cosign verify`,
+      #   pin its identity and issuer, and add a fail-closed verification step
+      #   ahead of the gate. Until then a vendor image here is unverified.
+      - name: Record upstream signature status (not verified)
+        env:
+          SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
+        run: |
+          echo "::notice::Upstream signature NOT verified for ${SOURCE_REF}" \
+            "(vendor tier, transport copy; integrity rests on the catalog digest pin)."
+          {
+            echo "### Upstream signature: NOT VERIFIED"
+            echo ""
+            echo "- \`${SOURCE_REF}\` is a vendor-tier transport copy."
+            echo "- Integrity rests on the catalog digest pin and the Trivy gate,"
+            echo "  not on an upstream signer."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # ---- record: full-severity SARIF for the Security tab -----------------
+      # Deliberately exit-code 0. This step never decides promotion; it exists
+      # so every finding, including the unfixable ones the gate ignores, stays
+      # visible and searchable. The gate below is the single decision point.
+      - name: Scan upstream image with Trivy (SARIF record)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
+        with:
+          image-ref: ${{ steps.resolve.outputs.source_ref }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
+
+      # GitHub Advanced Security (Code Security) is no longer active for this
+      # repo, so the Security tab no longer ingests SARIF. The scan record is
+      # preserved as a downloadable artifact instead of silently vanishing.
+      - name: Upload Trivy SARIF artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        with:
+          name: trivy-sarif-vendor-${{ matrix.id }}
+          path: trivy-results.sarif
+          retention-days: 90
+          if-no-files-found: warn
+
+      # ---- gate: promotion stops here on an actionable finding --------------
+      # Table format (not SARIF) so a failing run names the blocking CVEs in
+      # the job log and step summary instead of only in the Security tab.
+      - name: Trivy promotion gate
+        id: gate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
+        with:
+          # The SARIF step above already ran setup-trivy in this job, and that
+          # action appends the binary dir to $GITHUB_PATH, which persists across
+          # steps. Re-running setup here would redownload for no gain.
+          skip-setup-trivy: true
+          image-ref: ${{ steps.resolve.outputs.source_ref }}
+          format: table
+          output: trivy-gate.txt
+          exit-code: '1'
+          severity: ${{ steps.policy.outputs.trivy_severities }}
+          ignore-unfixed: ${{ steps.policy.outputs.trivy_ignore_unfixed }}
+          trivyignores: ${{ steps.policy.outputs.trivyignore_file }}
+
+      - name: Report gate findings
+        if: always() && hashFiles('trivy-gate.txt') != ''
+        env:
+          GATE_RESULT: ${{ steps.gate.outcome }}
+          SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
+          SEVERITIES: ${{ steps.policy.outputs.trivy_severities }}
+          IGNORE_UNFIXED: ${{ steps.policy.outputs.trivy_ignore_unfixed }}
+          EXCEPTIONS: ${{ steps.policy.outputs.trivy_exception_count }}
+        run: |
+          {
+            echo "### Trivy gate: ${GATE_RESULT}"
+            echo ""
+            echo "- Scanned: \`${SOURCE_REF}\`"
+            echo "- Blocking severities: ${SEVERITIES}"
+            echo "- Ignore unfixed: ${IGNORE_UNFIXED}"
+            echo "- Active CVE exceptions: ${EXCEPTIONS}"
+            echo ""
+            echo '```'
+            cat trivy-gate.txt
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${GATE_RESULT}" != "success" ]; then
+            SCOPE="finding(s)"
+            if [ "${IGNORE_UNFIXED}" = "true" ]; then
+              SCOPE="finding(s) with a fix available upstream"
+            fi
+            echo "::error::Promotion blocked: ${SOURCE_REF} has ${SEVERITIES}" \
+              "${SCOPE}. The public tag was NOT advanced; consumers keep the" \
+              "last known-good digest. Findings are listed in the step summary."
+          fi
+
+      # ---- promote: only reached when the gate passed -----------------------
+      - name: Copy verified image to GHCR
+        id: copy
+        env:
+          SOURCE_REF: ${{ steps.resolve.outputs.source_ref }}
+          TARGET: ${{ steps.resolve.outputs.target }}
+          SOURCE_DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          # Content-addressed: SOURCE_REF is SRC@DIGEST, the same manifest the
+          # gate just scanned, so the scan verdict and the published bytes
+          # cannot disagree. The whole multi-arch index is copied.
+          crane copy "${SOURCE_REF}" "${TARGET}"
+
+          # Assert: target must carry the digest we pinned and scanned.
+          TARGET_DIGEST=$(crane digest "${TARGET}")
+          if [ "${SOURCE_DIGEST}" != "${TARGET_DIGEST}" ]; then
+            echo "::error::Digest mismatch!"
+            echo "::error::  Scanned: ${SOURCE_DIGEST}"
+            echo "::error::  Target:  ${TARGET_DIGEST}"
+            exit 1
+          fi
+          echo "Digest verified: ${SOURCE_DIGEST}"
+
+          {
+            echo "target=${TARGET}"
+            echo "digest=${TARGET_DIGEST}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "| Image | \`${TARGET}\` |"
+            echo "| Source | \`${SOURCE_REF}\` |"
+            echo "| Digest | \`${TARGET_DIGEST}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+
+      - name: Generate SBOM with Syft
+        id: sbom
+        env:
+          GHCR_NAME: ${{ matrix.ghcr_name }}
+          TARGET: ${{ steps.copy.outputs.target }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
+        run: |
+          TARGET_WITH_DIGEST="${TARGET}@${DIGEST}"
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            "anchore/syft:${SYFT_VERSION}@sha256:${SYFT_SHA256}" \
+            "${TARGET_WITH_DIGEST}" \
+            -o cyclonedx-json > "sbom-${GHCR_NAME}.json"
+          echo "sbom_file=sbom-${GHCR_NAME}.json" >> "${GITHUB_OUTPUT}"
+
+      # Both switches must be "true". MIRROR_SIGNING_ENABLED is the RT-1 switch
+      # shared with the other jobs; MIRROR_VENDOR_SIGNING_ENABLED stays "false"
+      # until the vendor upstream signers are verified (see the signature-status
+      # step above), so lifting RT-1 for the DHI and distroless jobs cannot
+      # start minting this org's identity over unverified vendor bytes.
+      - name: Sign image with Cosign
+        if: github.ref == 'refs/heads/main' && env.MIRROR_SIGNING_ENABLED == 'true' && env.MIRROR_VENDOR_SIGNING_ENABLED == 'true'
+        env:
+          TARGET: ${{ steps.copy.outputs.target }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
+        run: cosign sign --yes "${TARGET}@${DIGEST}"
+
+      - name: Attest SBOM
+        if: github.ref == 'refs/heads/main' && steps.sbom.outputs.sbom_file != '' && env.MIRROR_SIGNING_ENABLED == 'true' && env.MIRROR_VENDOR_SIGNING_ENABLED == 'true'
+        env:
+          TARGET: ${{ steps.copy.outputs.target }}
+          DIGEST: ${{ steps.copy.outputs.digest }}
+          SBOM_FILE: ${{ steps.sbom.outputs.sbom_file }}
+        run: |
+          cosign attest --yes \
+            --predicate "${SBOM_FILE}" \
+            --type cyclonedx \
+            "${TARGET}@${DIGEST}"
+
+  # ===========================================================================
   # Summary
   # ===========================================================================
   summary:
     name: Mirror Summary
-    needs: [prepare, mirror-dhi, mirror-distroless]
+    needs: [prepare, mirror-dhi, mirror-distroless, mirror-vendor]
     runs-on: ubuntu-latest
     if: always()
 
@@ -720,8 +1076,10 @@ jobs:
         env:
           DHI_RESULT: ${{ needs.mirror-dhi.result }}
           DISTROLESS_RESULT: ${{ needs.mirror-distroless.result }}
+          VENDOR_RESULT: ${{ needs.mirror-vendor.result }}
           DHI_COUNT: ${{ needs.prepare.outputs.dhi_count }}
           DISTROLESS_COUNT: ${{ needs.prepare.outputs.distroless_count }}
+          VENDOR_COUNT: ${{ needs.prepare.outputs.vendor_count }}
           RUN_NUMBER: ${{ github.run_number }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
@@ -732,6 +1090,7 @@ jobs:
           echo "|-----|--------|--------|" >> "${GITHUB_STEP_SUMMARY}"
           echo "| DHI (primary tier) | ${DHI_COUNT} | ${DHI_RESULT} |" >> "${GITHUB_STEP_SUMMARY}"
           echo "| Distroless | ${DISTROLESS_COUNT} | ${DISTROLESS_RESULT} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Vendor (transport copy, unverified upstream) | ${VENDOR_COUNT} | ${VENDOR_RESULT} |" >> "${GITHUB_STEP_SUMMARY}"
           echo "" >> "${GITHUB_STEP_SUMMARY}"
           echo "**Copy method:** crane copy by digest (A1)" >> "${GITHUB_STEP_SUMMARY}"
           echo "**Matrix source:** catalog/images.yaml (A0)" >> "${GITHUB_STEP_SUMMARY}"
@@ -744,6 +1103,7 @@ jobs:
         env:
           DHI_RESULT: ${{ needs.mirror-dhi.result }}
           DISTROLESS_RESULT: ${{ needs.mirror-distroless.result }}
+          VENDOR_RESULT: ${{ needs.mirror-vendor.result }}
         run: |
           FAILED=0
           if [ "${DHI_RESULT}" != "success" ]; then
@@ -752,6 +1112,10 @@ jobs:
           fi
           if [ "${DISTROLESS_RESULT}" != "success" ]; then
             echo "::error::Distroless mirror job did not succeed (result: ${DISTROLESS_RESULT}). Check job logs for details."
+            FAILED=1
+          fi
+          if [ "${VENDOR_RESULT}" != "success" ]; then
+            echo "::error::Vendor mirror job did not succeed (result: ${VENDOR_RESULT}). Check job logs for details."
             FAILED=1
           fi
           if [ "${FAILED}" = "1" ]; then
