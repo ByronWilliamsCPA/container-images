@@ -5,8 +5,15 @@
 This repository uses a catalog-first workflow. The source of truth for all
 mirrored images is `catalog/images.yaml`.
 
-1. Edit `catalog/images.yaml` following the existing schema (each entry
-   specifies `source`, `destination`, and `tag` fields).
+1. Edit `catalog/images.yaml` following the existing schema (each entry has an
+   `id`, a `source_tier`, an `upstream` block of `registry`, `name` and `tag`,
+   and a `ghcr` block of `name` and `tag`).
+   - `source_tier` is `primary` (`dhi.io`), `distroless` (`gcr.io`) or `vendor`
+     (`docker.io`); each tier may only use its own registry.
+   - A `vendor` entry (third-party application image, ghcr name
+     `vendor-<component>`) must use an immutable version tag and must carry
+     `upstream.digest` (`sha256:<64 hex>`, from `crane digest`). It is a
+     transport copy of upstream, not a hardened image.
 2. Validate your changes locally:
    ```bash
    python3 scripts/validate_catalog_schema.py
