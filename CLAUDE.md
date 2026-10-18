@@ -31,7 +31,7 @@ Active phases:
 - A0 (catalog schema and matrix builder): complete
 - A1 (crane digest-copy mirror pipeline): complete
 - A2 (scanner policies): complete
-- A3 (promotion lock): partially complete — lock file schema, update script
+- A3 (promotion lock): partially complete: lock file schema, update script
   (`scripts/update_approved_lock.py`), and `update-lock` job in
   `publish-approved-image.yml` are all implemented; bot commit GPG signing is
   deferred pending a dedicated signing key in repo secrets
