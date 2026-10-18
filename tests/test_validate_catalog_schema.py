@@ -550,6 +550,19 @@ class TestVendorTier:
         errors = validate(minimal_catalog(img))
         assert any("ghcr.name" in e for e in errors)
 
+    def test_shipped_catalog_vendor_entries_are_digest_pinned(self):
+        """Every vendor entry in the real catalog passes the vendor rules."""
+        catalog_path = Path(__file__).parent.parent / "catalog" / "images.yaml"
+        with catalog_path.open() as fh:
+            catalog = yaml.safe_load(fh)
+        vendors = [i for i in catalog["images"] if i["source_tier"] == "vendor"]
+        assert vendors, "expected vendor-tier entries in the catalog"
+        assert validate(catalog) == []
+        for img in vendors:
+            assert img["id"].startswith("vendor-")
+            assert img["ghcr"]["name"].startswith("vendor-")
+            assert img["upstream"]["registry"] == "docker.io"
+
 
 # ---------------------------------------------------------------------------
 # main(): file I/O and exit-code contract
