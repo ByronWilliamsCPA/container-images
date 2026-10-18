@@ -73,6 +73,11 @@ TIER_REGISTRIES: dict[str, frozenset[str]] = {
     "vendor": frozenset({"docker.io"}),
 }
 
+# GHCR name prefix reserved for the vendor tier. A vendor entry MUST use it and
+# no other tier may, so the namespace always tells a consumer whether an image
+# is a hardened-base mirror or a third-party transport copy.
+VENDOR_GHCR_PREFIX = "vendor-"
+
 # Tiers whose upstream is third-party application software rather than a
 # hardened base. Their bytes are copied as published, so the entry MUST pin
 # an immutable digest and MUST NOT track a floating tag.
@@ -292,6 +297,31 @@ def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
     return errors
 
 
+def _validate_ghcr_prefix(ghcr_name: Any, tier: Any, img_id: str) -> list[str]:
+    """Enforce that the vendor- GHCR prefix belongs to the vendor tier alone."""
+    if not isinstance(ghcr_name, str) or not isinstance(tier, str):
+        return []
+    has_prefix = ghcr_name.startswith(VENDOR_GHCR_PREFIX)
+    if tier == "vendor" and not has_prefix:
+        return [
+            error(
+                f"ghcr.name {ghcr_name!r} must start with "
+                f"{VENDOR_GHCR_PREFIX!r} for source_tier 'vendor'",
+                img_id,
+            )
+        ]
+    if tier != "vendor" and has_prefix:
+        return [
+            error(
+                f"ghcr.name {ghcr_name!r} uses the reserved "
+                f"{VENDOR_GHCR_PREFIX!r} prefix, which only source_tier "
+                "'vendor' may use",
+                img_id,
+            )
+        ]
+    return []
+
+
 def _validate_ghcr(
     img: dict[str, Any], img_id: str, seen_ghcr_refs: set[str]
 ) -> list[str]:
@@ -314,6 +344,8 @@ def _validate_ghcr(
                 img_id,
             )
         )
+
+    errors.extend(_validate_ghcr_prefix(ghcr_name, img.get("source_tier"), img_id))
 
     ghcr_tag = ghcr.get("tag")
     if not _matches(_TAG_RE, ghcr_tag):

@@ -301,7 +301,10 @@ class TestRegistryAllowlist:
             ),
             ("vendor", vendor_upstream()),
         ):
-            img = minimal_image(source_tier=tier, upstream=upstream)
+            ghcr = {"name": f"{tier[:3]}-test", "tag": "1"}
+            if tier == "vendor":
+                ghcr["name"] = "vendor-test"
+            img = minimal_image(source_tier=tier, upstream=upstream, ghcr=ghcr)
             assert validate(minimal_catalog(img)) == [], f"{tier} should be allowed"
 
     @pytest.mark.parametrize(
@@ -549,6 +552,35 @@ class TestVendorTier:
         img["ghcr"]["name"] = "supabase/gotrue"
         errors = validate(minimal_catalog(img))
         assert any("ghcr.name" in e for e in errors)
+
+    @pytest.mark.parametrize("name", ["dhi-postgres", "distroless-static", "postgres"])
+    def test_vendor_entry_without_vendor_prefix_rejected(self, name):
+        img = vendor_image()
+        img["ghcr"]["name"] = name
+        errors = validate(minimal_catalog(img))
+        assert any(
+            "ghcr.name" in e and "must start with 'vendor-'" in e for e in errors
+        )
+
+    @pytest.mark.parametrize("tier", ["primary", "distroless"])
+    def test_other_tier_cannot_use_vendor_prefix(self, tier):
+        upstream = (
+            {"registry": "dhi.io", "name": "postgres", "tag": "16-debian13"}
+            if tier == "primary"
+            else {"registry": "gcr.io", "name": "distroless/static", "tag": "1"}
+        )
+        img = minimal_image(
+            source_tier=tier,
+            upstream=upstream,
+            ghcr={"name": "vendor-x", "tag": "1"},
+        )
+        errors = validate(minimal_catalog(img))
+        assert any("reserved 'vendor-' prefix" in e for e in errors)
+
+    def test_prefix_rule_skips_non_string_values_without_crash(self):
+        img = vendor_image(source_tier=["vendor"])
+        img["ghcr"]["name"] = 7
+        assert validate(minimal_catalog(img))
 
     def test_shipped_catalog_vendor_entries_are_digest_pinned(self):
         """Every vendor entry in the real catalog passes the vendor rules."""
