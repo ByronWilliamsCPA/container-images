@@ -138,6 +138,14 @@ def run_crane(args: list[str]) -> str | None:
     return result.stdout.strip()
 
 
+def _pin_ref(upstream: dict) -> str | None:
+    """Digest-addressed reference for an entry's `upstream.digest`, if any."""
+    digest = upstream.get("digest")
+    if not digest:
+        return None
+    return f"{upstream['registry']}/{upstream['name']}@{digest}"
+
+
 def parse_catalog(path: Path) -> list[dict]:
     """Flatten the catalog into the fields this check needs."""
     catalog = yaml.safe_load(path.read_text())
@@ -156,50 +164,67 @@ def parse_catalog(path: Path) -> list[dict]:
                 "platform": platform,
                 "tier": img.get("source_tier"),
                 "pin": img["upstream"].get("digest"),
+                "pin_ref": _pin_ref(img["upstream"]),
             }
         )
     return entries
 
 
-def check_pins(entries: list[dict]) -> list[tuple]:
+def check_pins_detailed(entries: list[dict]) -> tuple[list[tuple], list[str]]:
     """Report catalog `upstream.digest` pins that no longer resolve.
 
     For primary and distroless entries these pins are documentation:
     build_matrix.py does not emit the field, so the mirror copies by tag and
     never reads them. A pin nobody reads still rots, and a rotted pin next to a
     `#VERIFY` marker reads as a verified fact when it is the opposite. Vendor
-    entries are different: the mirror copies exactly the pinned digest, so a
-    pin that no longer matches the upstream tag means the tag was re-pushed and
-    the mirror is serving the older, reviewed bytes.
+    entries are different: the mirror resolves its platform manifest from the
+    pinned index digest, so a pin that no longer matches the upstream tag means
+    the tag was re-pushed and the mirror is serving the older, reviewed bytes.
 
     Accept either the index digest or the platform digest, since the catalog
     does not say which one was recorded.
+
+    Returns (drifted, unchecked). A vendor entry whose tag cannot be resolved
+    at all is returned in `unchecked` rather than passing silently: a vendor
+    pin is load-bearing, so missing evidence must not read as a clean bill.
+    Other tiers keep the older behaviour of skipping an unresolvable source.
     """
-    drifted = []
+    drifted: list[tuple] = []
+    unchecked: list[str] = []
     for entry in (e for e in entries if e["pin"]):
         index = run_crane(["digest", entry["source"]])
         platform = run_crane(
             ["digest", entry["source"], "--platform", entry["platform"]]
         )
         resolved = {d for d in (index, platform) if d}
-        if resolved and entry["pin"] not in resolved:
+        if not resolved and entry.get("tier") == "vendor":
+            unchecked.append(entry["id"])
+        elif resolved and entry["pin"] not in resolved:
             drifted.append((entry["id"], entry["pin"], sorted(resolved)))
-    return drifted
+    return drifted, unchecked
+
+
+def check_pins(entries: list[dict]) -> list[tuple]:
+    """Drifted pins only; see check_pins_detailed for the unchecked vendor ids."""
+    return check_pins_detailed(entries)[0]
 
 
 def check_staleness(entries: list[dict]) -> tuple[list[tuple], list[str]]:
     """Compare each entry's upstream platform digest against the mirror's.
 
-    Vendor entries are mirrored by their pinned index digest, so the expected
-    mirror digest is the catalog pin itself. Resolving the tag per platform
-    would compare a platform manifest against the mirrored index and report
-    every multi-arch vendor image as stale. Upstream re-pushing the tag is
-    reported by check_pins instead.
+    Vendor entries are mirrored as the platform manifest resolved from their
+    pinned index digest, so the expected mirror digest is that child of the pin
+    (an index immutably determines its children). Resolving the moving tag
+    instead would report a re-pushed tag as mirror staleness; that is
+    check_pins' job. If the pinned index cannot be resolved the entry is
+    unchecked, never clean.
     """
     stale, unchecked = [], []
     for entry in entries:
-        if entry.get("tier") == "vendor" and entry["pin"]:
-            source = entry["pin"]
+        if entry.get("tier") == "vendor" and entry.get("pin_ref"):
+            source = run_crane(
+                ["digest", entry["pin_ref"], "--platform", entry["platform"]]
+            )
         else:
             source = run_crane(
                 ["digest", entry["source"], "--platform", entry["platform"]]
@@ -241,7 +266,8 @@ def main() -> int:
 
     stale, unchecked = check_staleness(entries)
     missing, orphans = check_coverage(entries)
-    drifted_pins = check_pins(entries)
+    drifted_pins, unchecked_pins = check_pins_detailed(entries)
+    unchecked = sorted(set(unchecked) | set(unchecked_pins))
 
     if stale:
         print(f"STALE ({len(stale)}) -- upstream has rebuilt, mirror has not:")
@@ -272,7 +298,10 @@ def main() -> int:
             print(f"  {img_id}")
 
     if not (stale or missing or orphans or drifted_pins):
-        print("No drift: every catalog entry matches upstream.")
+        if unchecked:
+            print("\nNo drift in the entries that could be checked; see UNCHECKED.")
+        else:
+            print("No drift: every catalog entry matches upstream.")
 
     # Unchecked entries are not drift, but they are not proof of health either;
     # a credential or network failure must not read as a clean bill.
