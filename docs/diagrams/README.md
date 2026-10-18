@@ -41,10 +41,12 @@ without internals.
 ![Mirror pipeline](mirror-hardened-images.svg)
 
 The weekly mirror. `prepare` validates the catalog and builds the matrices, then
-`mirror-dhi` and `mirror-distroless` fan out per matrix entry: crane copy by
-resolved digest, a source-equals-target digest assertion, Trivy scan gate, Syft
-SBOM, and cosign sign plus attest on `main` only. The `summary` job aggregates
-results and fails the run if either mirror job did not succeed.
+`mirror-dhi`, `mirror-distroless` and `mirror-vendor` fan out per matrix entry:
+crane copy by resolved digest, a source-equals-target digest assertion, Trivy scan
+gate, Syft SBOM, and cosign sign plus attest on `main` only. `mirror-vendor` copies
+the catalog's pinned digest from Docker Hub instead of resolving a tag. The
+`summary` job aggregates results and fails the run if any mirror job did not
+succeed. The SVG for this diagram has not been regenerated for the vendor tier.
 
 ### A2: Publish approved image (reusable)
 

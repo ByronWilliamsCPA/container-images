@@ -59,7 +59,7 @@ package "Catalog: Source of Truth  [A0]" <<catalog>> {
 ' ============================================================
 package "Glue Scripts" <<script>> {
   rectangle "validate_catalog_schema.py\n<size:10>Schema + field validation\nDuplicate id/ref detection</size>" <<script>> as VALIDATE
-  rectangle "build_matrix.py\n<size:10>Emits GHA matrix JSON\nDHI vs Distroless tiers</size>" <<script>> as MATRIX
+  rectangle "build_matrix.py\n<size:10>Emits GHA matrix JSON\nDHI vs Distroless vs Vendor tiers</size>" <<script>> as MATRIX
   rectangle "load_scanner_policy.py\n<size:10>Translates policies.yaml\ninto scanner knobs</size>" <<script>> as POLICY_SCRIPT
   rectangle "verify_approved_lock.py\n<size:10>Schema + digest invariant\nCatalog cross-reference</size>" <<script>> as VERIFY_LOCK
   rectangle "update_approved_lock.py\n<size:10>Upserts promotion entry\ninto approved-lock.yaml</size>" <<script>> as UPDATE_LOCK

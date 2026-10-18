@@ -74,8 +74,10 @@ partition "Job: prepare (ubuntu-latest, 5 min)" {
       **Outputs** (yml:78-82)
       - dhi_matrix (JSON)
       - distroless_matrix (JSON)
+      - vendor_matrix (JSON)
       - dhi_count
       - distroless_count
+      - vendor_count
     end note
   else (no)
     #FF6B6B:Fail: schema error\nexit 1;
