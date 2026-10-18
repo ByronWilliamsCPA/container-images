@@ -5,7 +5,8 @@
 # Mirrors hardened images from upstream registries (dhi.io, gcr.io) to
 # GitHub Container Registry (ghcr.io/byronwilliamscpa/) as public repos, plus
 # third-party vendor application images from Docker Hub (docker.io, ADR-032).
-# The vendor tier is a transport copy pinned by digest: it is not hardened.
+# The vendor tier is a transport copy pinned by digest (one platform, like the
+# other tiers): it is not hardened.
 #
 # A0: Matrix is driven by catalog/images.yaml (not hardcoded inline).
 #     Adding an image = one catalog entry.
@@ -714,18 +715,29 @@ jobs:
   # Mirror Vendor Images (A1: crane copy by pinned digest, ADR-032)
   # ===========================================================================
   # Third-party application images (Supabase self-host stack) from Docker Hub.
-  # Differs from the two jobs above in exactly three ways:
+  # Differs from the two jobs above in exactly four ways:
   #   1. Source is docker.io, pulled anonymously: there is NO dhi.io login.
-  #   2. The copy is pinned to the catalog's upstream.digest (the reviewed
-  #      multi-arch index). The tag is never resolved to decide what to copy;
-  #      it is only compared against the pin to warn about a re-pushed tag.
+  #   2. What is copied is derived from the catalog's upstream.digest (the
+  #      reviewed multi-arch index), not from the tag. The pinned index
+  #      immutably determines its child manifests, so the platform manifest
+  #      resolved from it below is fixed by the pin. The tag is only compared
+  #      against the pin to warn about a re-pushed tag.
   #   3. Signing is behind an additional switch (MIRROR_VENDOR_SIGNING_ENABLED)
   #      because nothing here verifies the upstream publisher.
-  # The Trivy gate, policy loading, promotion order, SBOM and digest assertion
-  # are identical to the other jobs, and nothing here weakens them.
+  #   4. The job is skipped when the catalog has no vendor entries (an empty
+  #      matrix would otherwise fail the run).
+  # Like the dhi and distroless jobs, it publishes ONE platform
+  # (platform_compatibility.default), the manifest that Trivy scans and Syft
+  # inspects on the amd64 runner. Copying the whole index would publish
+  # platforms the gate never saw. The Trivy gate, policy loading, promotion
+  # order and digest assertion are otherwise the same as the other jobs, and
+  # nothing here weakens them.
   mirror-vendor:
     name: "Mirror vendor ${{ matrix.ghcr_name }}:${{ matrix.ghcr_tag }}"
     needs: prepare
+    # An empty matrix makes `fromJson` fail the whole run; skip when there is
+    # nothing to mirror. The summary job accepts `skipped` only for a zero count.
+    if: needs.prepare.outputs.vendor_count != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: publish
@@ -811,12 +823,16 @@ jobs:
             --image-id "${IMAGE_ID}" \
             --trivyignore-out .trivyignore
 
-      # RT-4: confirm the pinned upstream digest. NOTHING is published by this
-      # step -- the copy happens only after the gate below passes.
+      # RT-4: resolve the exact platform manifest to scan and publish. NOTHING
+      # is published by this step -- the copy happens only after the gate below
+      # passes.
       #
-      # The digest comes from the catalog, not from the registry: the bytes
-      # scanned, copied and asserted below are the ones a reviewer pinned in a
-      # PR. A moved tag therefore cannot change what is published.
+      # The pin in the catalog is the multi-arch INDEX digest. A digest-addressed
+      # index immutably determines its child manifests, so asking it for the
+      # default platform's child is deterministic: the same pin always yields
+      # the same platform digest, whatever the tag has since been re-pushed to.
+      # That platform digest is what Trivy scans, crane copies and the target
+      # is asserted against, exactly as in the dhi and distroless jobs.
       - name: Resolve pinned upstream digest
         id: resolve
         env:
@@ -826,34 +842,44 @@ jobs:
           UPSTREAM_DIGEST: ${{ matrix.upstream_digest }}
           GHCR_NAME: ${{ matrix.ghcr_name }}
           GHCR_TAG: ${{ matrix.ghcr_tag }}
+          PLATFORM: ${{ matrix.platform }}
           GHCR_OWNER: ${{ github.repository_owner }}
         run: |
           GHCR_OWNER=$(echo "${GHCR_OWNER}" | tr '[:upper:]' '[:lower:]')
           SOURCE="${UPSTREAM_REGISTRY}/${UPSTREAM_NAME}:${UPSTREAM_TAG}"
-          SOURCE_REF="${UPSTREAM_REGISTRY}/${UPSTREAM_NAME}@${UPSTREAM_DIGEST}"
+          INDEX_REF="${UPSTREAM_REGISTRY}/${UPSTREAM_NAME}@${UPSTREAM_DIGEST}"
           TARGET="ghcr.io/${GHCR_OWNER}/${GHCR_NAME}:${GHCR_TAG}"
 
-          echo "Source: ${SOURCE}"
-          echo "Pinned: ${SOURCE_REF}"
+          echo "Source: ${SOURCE}  Platform: ${PLATFORM}"
+          echo "Pinned index: ${INDEX_REF}"
           echo "Target: ${TARGET}"
 
-          # Shape-guard before the value reaches GITHUB_OUTPUT: an empty or
-          # newline-bearing digest must not be able to smuggle extra output
-          # lines into steps that consume it as a scan ref.
+          # Shape-guard before the value is used as a reference or reaches
+          # GITHUB_OUTPUT: an empty or newline-bearing digest must not be able
+          # to smuggle extra output lines into later steps.
           if ! printf '%s' "${UPSTREAM_DIGEST}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
             echo "::error::Catalog digest for ${SOURCE} is missing or malformed: ${UPSTREAM_DIGEST}"
             exit 1
           fi
 
-          # The pinned digest must still exist upstream. Fail hard if it does
+          # The pinned index must still exist upstream. Fail hard if it does
           # not; a pin that no longer resolves is not something to paper over.
-          RESOLVED_DIGEST=$(crane digest "${SOURCE_REF}")
-          if [ "${RESOLVED_DIGEST}" != "${UPSTREAM_DIGEST}" ]; then
+          RESOLVED_INDEX=$(crane digest "${INDEX_REF}")
+          if [ "${RESOLVED_INDEX}" != "${UPSTREAM_DIGEST}" ]; then
             echo "::error::Pinned digest did not resolve to itself!"
             echo "::error::  Pinned:   ${UPSTREAM_DIGEST}"
-            echo "::error::  Resolved: ${RESOLVED_DIGEST}"
+            echo "::error::  Resolved: ${RESOLVED_INDEX}"
             exit 1
           fi
+
+          # Platform manifest inside the pinned index. This is the one value
+          # everything downstream (scan, copy, assertion) is pinned to.
+          SOURCE_DIGEST=$(crane digest "${INDEX_REF}" --platform "${PLATFORM}")
+          if ! printf '%s' "${SOURCE_DIGEST}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::Resolved platform digest has unexpected shape: ${SOURCE_DIGEST}"
+            exit 1
+          fi
+          echo "Platform digest (${PLATFORM}): ${SOURCE_DIGEST}"
 
           # Advisory only: if upstream re-pushed the tag, the mirror keeps
           # serving the reviewed digest. Surface it so the pin is re-reviewed.
@@ -868,9 +894,10 @@ jobs:
 
           {
             echo "source=${SOURCE}"
-            echo "source_ref=${SOURCE_REF}"
+            echo "source_ref=${UPSTREAM_REGISTRY}/${UPSTREAM_NAME}@${SOURCE_DIGEST}"
+            echo "index_ref=${INDEX_REF}"
             echo "target=${TARGET}"
-            echo "digest=${UPSTREAM_DIGEST}"
+            echo "digest=${SOURCE_DIGEST}"
           } >> "${GITHUB_OUTPUT}"
 
       # Upstream signature handling for the vendor tier, stated explicitly.
@@ -985,12 +1012,12 @@ jobs:
           TARGET: ${{ steps.resolve.outputs.target }}
           SOURCE_DIGEST: ${{ steps.resolve.outputs.digest }}
         run: |
-          # Content-addressed: SOURCE_REF is SRC@DIGEST, the same manifest the
-          # gate just scanned, so the scan verdict and the published bytes
-          # cannot disagree. The whole multi-arch index is copied.
+          # Content-addressed: SOURCE_REF is SRC@DIGEST for the platform
+          # manifest the gate just scanned, so the scan verdict and the
+          # published bytes cannot disagree. Only this one platform is copied.
           crane copy "${SOURCE_REF}" "${TARGET}"
 
-          # Assert: target must carry the digest we pinned and scanned.
+          # Assert: target must carry the platform digest we scanned.
           TARGET_DIGEST=$(crane digest "${TARGET}")
           if [ "${SOURCE_DIGEST}" != "${TARGET_DIGEST}" ]; then
             echo "::error::Digest mismatch!"
@@ -1104,6 +1131,7 @@ jobs:
           DHI_RESULT: ${{ needs.mirror-dhi.result }}
           DISTROLESS_RESULT: ${{ needs.mirror-distroless.result }}
           VENDOR_RESULT: ${{ needs.mirror-vendor.result }}
+          VENDOR_COUNT: ${{ needs.prepare.outputs.vendor_count }}
         run: |
           FAILED=0
           if [ "${DHI_RESULT}" != "success" ]; then
@@ -1114,7 +1142,12 @@ jobs:
             echo "::error::Distroless mirror job did not succeed (result: ${DISTROLESS_RESULT}). Check job logs for details."
             FAILED=1
           fi
-          if [ "${VENDOR_RESULT}" != "success" ]; then
+          # The vendor job is skipped when the catalog has no vendor entries;
+          # that is the only case where "skipped" is acceptable. A skip with a
+          # non-zero count means the job never ran (e.g. prepare failed).
+          if [ "${VENDOR_RESULT}" = "skipped" ] && [ "${VENDOR_COUNT}" = "0" ]; then
+            echo "No vendor images in the catalog; vendor mirror job skipped."
+          elif [ "${VENDOR_RESULT}" != "success" ]; then
             echo "::error::Vendor mirror job did not succeed (result: ${VENDOR_RESULT}). Check job logs for details."
             FAILED=1
           fi
