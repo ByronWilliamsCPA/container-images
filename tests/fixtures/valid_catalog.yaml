@@ -43,3 +43,23 @@ images:
     platform_compatibility:
       default: linux/amd64
       supported: [linux/amd64]
+
+  - id: vendor-supabase-gotrue
+    display_name: "Vendor Supabase GoTrue"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: supabase/gotrue
+      tag: "v2.197.0"
+      digest: "sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b"
+    ghcr:
+      name: vendor-supabase-gotrue
+      tag: "v2.197.0"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]

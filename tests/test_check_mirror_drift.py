@@ -203,6 +203,7 @@ class TestParseCatalog:
 
 PIN = "sha256:" + "a" * 64
 OTHER = "sha256:" + "b" * 64
+PLATFORM = "sha256:" + "c" * 64
 
 
 class TestCheckPins:
@@ -248,3 +249,169 @@ class TestCheckPins:
         """A failed registry query is missing evidence, not evidence of drift."""
         monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: None)
         assert check_mirror_drift.check_pins([self._entry(PIN)]) == []
+
+
+# ---------------------------------------------------------------------------
+# check_staleness: vendor entries are mirrored by pinned index digest
+# ---------------------------------------------------------------------------
+
+
+class TestCheckStalenessVendor:
+    @staticmethod
+    def _entry(tier):
+        return {
+            "id": "vendor-supabase-gotrue",
+            "source": "docker.io/supabase/gotrue:v2.197.0",
+            "pin_ref": f"docker.io/supabase/gotrue@{PIN}",
+            "target": "ghcr.io/byronwilliamscpa/vendor-supabase-gotrue:v2.197.0",
+            "platform": "linux/amd64",
+            "tier": tier,
+            "pin": PIN,
+        }
+
+    def test_vendor_compares_platform_child_of_the_pin(self, monkeypatch):
+        """The mirror holds the platform manifest resolved from the pinned index."""
+        calls: list[list[str]] = []
+
+        def fake(args):
+            calls.append(args)
+            # Child of the pin and the mirrored target agree; the tag has moved.
+            if args[1].startswith("ghcr.io") or "@" in args[1]:
+                return PLATFORM
+            return OTHER
+
+        monkeypatch.setattr(check_mirror_drift, "run_crane", fake)
+        stale, unchecked = check_mirror_drift.check_staleness([self._entry("vendor")])
+        assert (stale, unchecked) == ([], [])
+        assert [
+            "digest",
+            f"docker.io/supabase/gotrue@{PIN}",
+            "--platform",
+            "linux/amd64",
+        ] in calls
+        assert not any(c[1].endswith(":v2.197.0") for c in calls if "docker.io" in c[1])
+
+    def test_vendor_mirror_not_matching_pinned_child_is_stale(self, monkeypatch):
+        monkeypatch.setattr(
+            check_mirror_drift,
+            "run_crane",
+            lambda a: PLATFORM if "@" in a[1] else OTHER,
+        )
+        stale, _ = check_mirror_drift.check_staleness([self._entry("vendor")])
+        assert [s[0] for s in stale] == ["vendor-supabase-gotrue"]
+
+    def test_vendor_unresolvable_pin_is_unchecked_not_clean(self, monkeypatch):
+        monkeypatch.setattr(
+            check_mirror_drift,
+            "run_crane",
+            lambda a: None if "@" in a[1] else PLATFORM,
+        )
+        stale, unchecked = check_mirror_drift.check_staleness([self._entry("vendor")])
+        assert stale == []
+        assert unchecked == ["vendor-supabase-gotrue"]
+
+    def test_non_vendor_still_compares_platform_digest(self, monkeypatch):
+        """Primary and distroless behaviour is unchanged."""
+        monkeypatch.setattr(
+            check_mirror_drift,
+            "run_crane",
+            lambda a: OTHER if "--platform" in a else PIN,
+        )
+        stale, _ = check_mirror_drift.check_staleness([self._entry("primary")])
+        assert len(stale) == 1
+
+
+class TestCheckPinsVendorUnchecked:
+    @staticmethod
+    def _entry(tier):
+        return {
+            "id": f"{tier}-x",
+            "source": "docker.io/ns/x:1.0",
+            "platform": "linux/amd64",
+            "tier": tier,
+            "pin": PIN,
+        }
+
+    def test_vendor_with_unresolvable_tag_is_unchecked(self, monkeypatch):
+        """Both index and platform lookups failing must not read as clean."""
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: None)
+        drifted, unchecked = check_mirror_drift.check_pins_detailed(
+            [self._entry("vendor")]
+        )
+        assert drifted == []
+        assert unchecked == ["vendor-x"]
+
+    def test_non_vendor_with_unresolvable_tag_keeps_old_behaviour(self, monkeypatch):
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: None)
+        assert check_mirror_drift.check_pins_detailed([self._entry("primary")]) == (
+            [],
+            [],
+        )
+
+    def test_vendor_with_resolvable_matching_tag_is_clean(self, monkeypatch):
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: PIN)
+        assert check_mirror_drift.check_pins_detailed([self._entry("vendor")]) == (
+            [],
+            [],
+        )
+
+    def test_vendor_with_moved_tag_is_drift(self, monkeypatch):
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: OTHER)
+        drifted, unchecked = check_mirror_drift.check_pins_detailed(
+            [self._entry("vendor")]
+        )
+        assert [d[0] for d in drifted] == ["vendor-x"]
+        assert unchecked == []
+
+    def test_check_pins_wrapper_returns_drift_only(self, monkeypatch):
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: None)
+        assert check_mirror_drift.check_pins([self._entry("vendor")]) == []
+
+    def test_main_reports_unchecked_vendor_pin_and_exits_1(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        path = tmp_path / "images.yaml"
+        path.write_text(
+            textwrap.dedent(
+                f"""
+                images:
+                  - id: vendor-x
+                    source_tier: vendor
+                    upstream:
+                      registry: docker.io
+                      name: ns/x
+                      tag: "1.0"
+                      digest: "{PIN}"
+                    ghcr: {{name: vendor-x, tag: "1.0"}}
+                """
+            )
+        )
+        monkeypatch.setattr(check_mirror_drift, "CATALOG_PATH", path)
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: None)
+        assert check_mirror_drift.main() == 1
+        out = capsys.readouterr().out
+        assert "UNCHECKED" in out
+        assert "vendor-x" in out
+        assert "No drift: every catalog entry" not in out
+
+    def test_tier_is_parsed_from_catalog(self, tmp_path: Path):
+        path = tmp_path / "images.yaml"
+        path.write_text(
+            textwrap.dedent(
+                f"""
+                images:
+                  - id: vendor-x
+                    source_tier: vendor
+                    upstream:
+                      registry: docker.io
+                      name: ns/x
+                      tag: "1.0"
+                      digest: "{PIN}"
+                    ghcr: {{name: vendor-x, tag: "1.0"}}
+                """
+            )
+        )
+        entry = parse_catalog(path)[0]
+        assert entry["tier"] == "vendor"
+        assert entry["source"] == "docker.io/ns/x:1.0"
+        assert entry["pin_ref"] == f"docker.io/ns/x@{PIN}"

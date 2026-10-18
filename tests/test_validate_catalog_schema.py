@@ -44,6 +44,30 @@ def minimal_image(**overrides) -> dict:
     return base
 
 
+def vendor_upstream(**overrides) -> dict:
+    """A valid Docker Hub vendor upstream block (immutable tag plus digest)."""
+    base = {
+        "registry": "docker.io",
+        "name": "supabase/gotrue",
+        "tag": "v2.197.0",
+        "digest": "sha256:" + "b" * 64,
+    }
+    base.update(overrides)
+    return base
+
+
+def vendor_image(**overrides) -> dict:
+    """A valid vendor-tier catalog entry."""
+    base = minimal_image(
+        id="vendor-supabase-gotrue",
+        source_tier="vendor",
+        upstream=vendor_upstream(),
+        ghcr={"name": "vendor-supabase-gotrue", "tag": "v2.197.0"},
+    )
+    base.update(overrides)
+    return base
+
+
 def minimal_catalog(*images) -> dict:
     return {"apiVersion": "v1", "images": list(images)}
 
@@ -268,11 +292,73 @@ class TestRegistryAllowlist:
         assert any("not allowed" in e for e in errors)
 
     def test_allowed_registries_pass(self):
-        for reg, name in (("dhi.io", "postgres"), ("gcr.io", "distroless/static")):
-            img = minimal_image(
-                upstream={"registry": reg, "name": name, "tag": "1-debian13"}
-            )
-            assert validate(minimal_catalog(img)) == [], f"{reg} should be allowed"
+        """Each tier is accepted with the one registry it owns."""
+        for tier, upstream in (
+            ("primary", {"registry": "dhi.io", "name": "postgres", "tag": "1-d13"}),
+            (
+                "distroless",
+                {"registry": "gcr.io", "name": "distroless/static", "tag": "1-d13"},
+            ),
+            ("vendor", vendor_upstream()),
+        ):
+            ghcr = {"name": f"{tier[:3]}-test", "tag": "1"}
+            if tier == "vendor":
+                ghcr["name"] = "vendor-test"
+            img = minimal_image(source_tier=tier, upstream=upstream, ghcr=ghcr)
+            assert validate(minimal_catalog(img)) == [], f"{tier} should be allowed"
+
+    @pytest.mark.parametrize(
+        ("tier", "registry", "name"),
+        [
+            ("primary", "docker.io", "supabase/gotrue"),
+            ("primary", "gcr.io", "distroless/static"),
+            ("distroless", "dhi.io", "postgres"),
+            ("distroless", "docker.io", "supabase/gotrue"),
+            ("vendor", "dhi.io", "postgres"),
+            ("vendor", "gcr.io", "distroless/static"),
+        ],
+    )
+    def test_tier_cannot_use_another_tiers_registry(self, tier, registry, name):
+        """The allowlist is per tier, not one global set."""
+        upstream = vendor_upstream(registry=registry, name=name)
+        if tier != "vendor":
+            upstream.pop("digest")
+            upstream["tag"] = "1-debian13"
+        img = minimal_image(source_tier=tier, upstream=upstream)
+        errors = validate(minimal_catalog(img))
+        assert any(
+            "not allowed for source_tier" in e and repr(tier) in e for e in errors
+        ), errors
+
+    def test_vendor_with_dhi_registry_rejected(self):
+        img = minimal_image(
+            source_tier="vendor", upstream=vendor_upstream(registry="dhi.io")
+        )
+        errors = validate(minimal_catalog(img))
+        assert any("registry" in e and "not allowed" in e for e in errors)
+
+    def test_primary_with_docker_hub_rejected(self):
+        img = minimal_image(
+            upstream={
+                "registry": "docker.io",
+                "name": "supabase/gotrue",
+                "tag": "v2.197.0",
+            }
+        )
+        errors = validate(minimal_catalog(img))
+        assert any("registry" in e and "not allowed" in e for e in errors)
+
+    def test_unknown_tier_reports_only_the_enum_error(self):
+        """A bad source_tier must not also raise a misleading registry error."""
+        img = minimal_image(source_tier="bogus")
+        errors = validate(minimal_catalog(img))
+        assert len(errors) == 1
+        assert "source_tier" in errors[0]
+
+    def test_non_string_tier_does_not_crash(self):
+        img = minimal_image(source_tier=["vendor"])
+        errors = validate(minimal_catalog(img))
+        assert any("source_tier" in e for e in errors)
 
 
 class TestUpstreamNameShape:
@@ -295,10 +381,28 @@ class TestUpstreamNameShape:
         assert any("upstream.name" in e for e in errors)
 
     def test_nested_path_name_allowed(self):
-        img = minimal_image()
+        img = minimal_image(source_tier="distroless")
+        img["upstream"]["registry"] = "gcr.io"
         img["upstream"]["name"] = "distroless/python3-debian12"
         # tag stays non-mutable so the digest rule does not also fire
         assert validate(minimal_catalog(img)) == []
+
+    def test_docker_hub_namespace_repo_name_allowed(self):
+        """Docker Hub names are <namespace>/<repo> (single slash)."""
+        img = vendor_image()
+        assert img["upstream"]["name"] == "supabase/gotrue"
+        assert validate(minimal_catalog(img)) == []
+
+    @pytest.mark.parametrize(
+        "name",
+        ["gotrue", "supabase/gotrue/extra", "Supabase/gotrue", "../supabase"],
+        ids=["bare", "three_segments", "uppercase", "traversal"],
+    )
+    def test_docker_hub_name_shape_enforced(self, name):
+        img = vendor_image()
+        img["upstream"]["name"] = name
+        errors = validate(minimal_catalog(img))
+        assert any("upstream.name" in e for e in errors)
 
 
 class TestGhcrNameShape:
@@ -340,11 +444,12 @@ class TestMutableTagDigestPin:
     def test_latest_without_digest_rejected(self):
         """RT-6: a mutable tag must be backed by a pinned digest."""
         img = minimal_image(
+            source_tier="distroless",
             upstream={
                 "registry": "gcr.io",
                 "name": "distroless/static",
                 "tag": "latest",
-            }
+            },
         )
         errors = validate(minimal_catalog(img))
         assert any("mutable" in e and "digest" in e for e in errors)
@@ -352,12 +457,13 @@ class TestMutableTagDigestPin:
     def test_latest_with_valid_digest_passes(self):
         digest = "sha256:" + "a" * 64
         img = minimal_image(
+            source_tier="distroless",
             upstream={
                 "registry": "gcr.io",
                 "name": "distroless/static",
                 "tag": "latest",
                 "digest": digest,
-            }
+            },
         )
         assert validate(minimal_catalog(img)) == []
 
@@ -378,6 +484,116 @@ class TestMutableTagDigestPin:
             upstream={"registry": "dhi.io", "name": "postgres", "tag": "16-debian13"}
         )
         assert validate(minimal_catalog(img)) == []
+
+
+# ---------------------------------------------------------------------------
+# Vendor tier: third-party application images mirrored from Docker Hub
+# (ADR-032). The digest is mandatory and floating tags are refused.
+# ---------------------------------------------------------------------------
+
+
+class TestVendorTier:
+    def test_vendor_entry_accepted(self):
+        assert validate(minimal_catalog(vendor_image())) == []
+
+    def test_vendor_without_digest_rejected(self):
+        img = vendor_image()
+        del img["upstream"]["digest"]
+        errors = validate(minimal_catalog(img))
+        assert any("upstream.digest is required" in e for e in errors)
+
+    def test_vendor_with_immutable_tag_still_needs_digest(self):
+        """Unlike primary, a pinned-looking version tag does not excuse the digest."""
+        img = vendor_image()
+        img["upstream"]["tag"] = "v2.197.0"
+        del img["upstream"]["digest"]
+        assert validate(minimal_catalog(img))
+
+    def test_primary_with_immutable_tag_needs_no_digest(self):
+        """The digest requirement is vendor-specific; primary behaviour is unchanged."""
+        assert validate(minimal_catalog(minimal_image())) == []
+
+    def test_vendor_with_latest_rejected_without_digest(self):
+        img = vendor_image()
+        img["upstream"]["tag"] = "latest"
+        del img["upstream"]["digest"]
+        errors = validate(minimal_catalog(img))
+        assert any("mutable" in e and "'latest'" in e for e in errors)
+        assert any("upstream.digest is required" in e for e in errors)
+
+    def test_vendor_with_latest_rejected_even_with_digest(self):
+        """A digest does not legitimise a floating tag for vendor images."""
+        img = vendor_image()
+        img["upstream"]["tag"] = "latest"
+        errors = validate(minimal_catalog(img))
+        assert any("mutable" in e and "not allowed" in e for e in errors)
+
+    @pytest.mark.parametrize("tag", ["stable", "edge", "main", "nightly", "LATEST"])
+    def test_vendor_mutable_tags_rejected(self, tag):
+        img = vendor_image()
+        img["upstream"]["tag"] = tag
+        errors = validate(minimal_catalog(img))
+        assert any("mutable" in e for e in errors)
+
+    def test_vendor_with_malformed_digest_rejected(self):
+        img = vendor_image()
+        img["upstream"]["digest"] = "sha256:not-hex"
+        errors = validate(minimal_catalog(img))
+        assert any("upstream.digest" in e and "sha256" in e for e in errors)
+
+    def test_vendor_with_non_string_digest_rejected_without_crash(self):
+        img = vendor_image()
+        img["upstream"]["digest"] = 12345
+        errors = validate(minimal_catalog(img))
+        assert any("upstream.digest" in e for e in errors)
+
+    def test_vendor_ghcr_name_stays_single_segment(self):
+        img = vendor_image()
+        img["ghcr"]["name"] = "supabase/gotrue"
+        errors = validate(minimal_catalog(img))
+        assert any("ghcr.name" in e for e in errors)
+
+    @pytest.mark.parametrize("name", ["dhi-postgres", "distroless-static", "postgres"])
+    def test_vendor_entry_without_vendor_prefix_rejected(self, name):
+        img = vendor_image()
+        img["ghcr"]["name"] = name
+        errors = validate(minimal_catalog(img))
+        assert any(
+            "ghcr.name" in e and "must start with 'vendor-'" in e for e in errors
+        )
+
+    @pytest.mark.parametrize("tier", ["primary", "distroless"])
+    def test_other_tier_cannot_use_vendor_prefix(self, tier):
+        upstream = (
+            {"registry": "dhi.io", "name": "postgres", "tag": "16-debian13"}
+            if tier == "primary"
+            else {"registry": "gcr.io", "name": "distroless/static", "tag": "1"}
+        )
+        img = minimal_image(
+            source_tier=tier,
+            upstream=upstream,
+            ghcr={"name": "vendor-x", "tag": "1"},
+        )
+        errors = validate(minimal_catalog(img))
+        assert any("reserved 'vendor-' prefix" in e for e in errors)
+
+    def test_prefix_rule_skips_non_string_values_without_crash(self):
+        img = vendor_image(source_tier=["vendor"])
+        img["ghcr"]["name"] = 7
+        assert validate(minimal_catalog(img))
+
+    def test_shipped_catalog_vendor_entries_are_digest_pinned(self):
+        """Every vendor entry in the real catalog passes the vendor rules."""
+        catalog_path = Path(__file__).parent.parent / "catalog" / "images.yaml"
+        with catalog_path.open() as fh:
+            catalog = yaml.safe_load(fh)
+        vendors = [i for i in catalog["images"] if i["source_tier"] == "vendor"]
+        assert vendors, "expected vendor-tier entries in the catalog"
+        assert validate(catalog) == []
+        for img in vendors:
+            assert img["id"].startswith("vendor-")
+            assert img["ghcr"]["name"].startswith("vendor-")
+            assert img["upstream"]["registry"] == "docker.io"
 
 
 # ---------------------------------------------------------------------------

@@ -5,13 +5,15 @@ metadata:
   schema_version: "1.0"
   description: Approved container image catalog for homelab infrastructure
   maintainer: ByronWilliamsCPA/container-images
-  last_updated: "2026-07-18"
+  last_updated: "2026-10-18"
 
 # Each entry defines one image family version.
 # Fields:
 #   id:                       unique slug, kebab-case
 #   display_name:             human-readable label
-#   source_tier:              primary (DHI) | distroless (Google Distroless)
+#   source_tier:              primary (DHI hardened base) |
+#                             distroless (Google Distroless) |
+#                             vendor (third-party app image from Docker Hub, ADR-032)
 #   criticality:              critical | high | medium | low
 #   classification_status:    classified | pending
 #   disposition:              mirror_only | custom_derivative | decommission | exception_only
@@ -21,7 +23,10 @@ metadata:
 #   upstream:
 #     registry:               source registry hostname
 #     name:                   image name (no registry prefix)
-#     tag:                    upstream mutable tag
+#     tag:                    upstream tag (mutable for primary/distroless;
+#                             immutable version tag for vendor)
+#     digest:                 sha256:<64 hex> pin; REQUIRED for vendor (copied by
+#                             this digest), optional elsewhere
 #   ghcr:
 #     name:                   name in ghcr.io/byronwilliamscpa/
 #     tag:                    tag to publish to GHCR
@@ -753,3 +758,337 @@ images:
       default: linux/amd64
       supported: [linux/amd64]
     notes: "Minimal static binary base; no libc, no shell"
+
+  # ---------------------------------------------------------------------------
+  # Vendor application images (vendor tier, ADR-032)
+  # ---------------------------------------------------------------------------
+  # Third-party application images mirrored from Docker Hub for the CYO
+  # Supabase self-host stack. These are TRANSPORT copies of upstream: they are
+  # not hardened, not rebuilt, and carry no upstream signature that this
+  # pipeline verifies. They exist so the stack pulls from GHCR (one registry,
+  # one scan gate, no Docker Hub rate limits) instead of from Docker Hub.
+  #
+  # Rules for this tier (enforced by scripts/validate_catalog_schema.py):
+  #   - upstream.registry is docker.io, upstream.name is <namespace>/<repo>
+  #   - upstream.digest is REQUIRED and is the pin of record. It is the upstream
+  #     multi-arch INDEX digest; the mirror resolves the platform_compatibility
+  #     .default child manifest from it (an index immutably determines its
+  #     children), scans and copies that one manifest, and never follows the tag
+  #   - upstream.tag is an immutable version tag, never latest/stable/edge/...
+  #   - ghcr.name starts with vendor- (and no other tier may use that prefix),
+  #     ghcr.tag keeps the upstream tag
+  #
+  # Pins taken from github.com/supabase/supabase docker/docker-compose.yml as
+  # of 2026-10-18; each digest was re-resolved with `crane digest` that day.
+  # All eleven upstream tags are OCI image indexes carrying linux/amd64 and
+  # linux/arm64. Like every other tier, only ONE platform is published
+  # (linux/amd64): it is the manifest the Trivy gate and Syft actually inspect
+  # on the amd64 runner, so no unscanned architecture reaches GHCR.
+
+  - id: vendor-supabase-studio
+    display_name: "Vendor Supabase Studio"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: supabase/studio
+      # #ASSUME docker.io/supabase/studio:2026.10.12-sha-3699278 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/supabase/studio:2026.10.12-sha-3699278`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "2026.10.12-sha-3699278"
+      digest: "sha256:948770ec467f00e6ae34c35018ef7cb23d7b30eb806b42c2cc0d7bcfdcf8a7a8"
+    ghcr:
+      name: vendor-supabase-studio
+      tag: "2026.10.12-sha-3699278"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      Supabase Studio (dashboard and SQL editor UI).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-envoy
+    display_name: "Vendor Envoy"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: envoyproxy/envoy
+      # #ASSUME docker.io/envoyproxy/envoy:v1.39.1 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/envoyproxy/envoy:v1.39.1`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "v1.39.1"
+      digest: "sha256:57e14a549d7bd43c8d3f6d03e8cfa653e037d4b38e133acd9b54f38c524401b4"
+    ghcr:
+      name: vendor-envoy
+      tag: "v1.39.1"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      Envoy proxy (API gateway in front of the Supabase services).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-supabase-gotrue
+    display_name: "Vendor Supabase GoTrue"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: supabase/gotrue
+      # #ASSUME docker.io/supabase/gotrue:v2.197.0 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/supabase/gotrue:v2.197.0`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "v2.197.0"
+      digest: "sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b"
+    ghcr:
+      name: vendor-supabase-gotrue
+      tag: "v2.197.0"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      Supabase Auth (GoTrue).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-postgrest
+    display_name: "Vendor PostgREST"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: postgrest/postgrest
+      # #ASSUME docker.io/postgrest/postgrest:v14.18 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/postgrest/postgrest:v14.18`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "v14.18"
+      digest: "sha256:c7cd7e265a85b05248abf53f4473fcec7e327c282d0bd0cf60f1551996d09fcf"
+    ghcr:
+      name: vendor-postgrest
+      tag: "v14.18"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      PostgREST (REST API over Postgres).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-supabase-realtime
+    display_name: "Vendor Supabase Realtime"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: supabase/realtime
+      # #ASSUME docker.io/supabase/realtime:v2.143.3 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/supabase/realtime:v2.143.3`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "v2.143.3"
+      digest: "sha256:768b559241dd234c4e8852c5c0f504e598b80f1df2ad4dd78d5486fbed2f17a2"
+    ghcr:
+      name: vendor-supabase-realtime
+      tag: "v2.143.3"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      Supabase Realtime (websocket change feed).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-supabase-storage-api
+    display_name: "Vendor Supabase Storage API"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: supabase/storage-api
+      # #ASSUME docker.io/supabase/storage-api:v1.81.0 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/supabase/storage-api:v1.81.0`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "v1.81.0"
+      digest: "sha256:98ffec5d0678803783c30e404c27f4ec65e97efbe014088f2a86b4b8b54b9f54"
+    ghcr:
+      name: vendor-supabase-storage-api
+      tag: "v1.81.0"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      Supabase Storage API.
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-imgproxy
+    display_name: "Vendor imgproxy"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: darthsim/imgproxy
+      # #ASSUME docker.io/darthsim/imgproxy:v3.31.4 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/darthsim/imgproxy:v3.31.4`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "v3.31.4"
+      digest: "sha256:73c5dda13199745b0d2d00e4149d4a589c5b2e205dbf335ca05eca8276b54712"
+    ghcr:
+      name: vendor-imgproxy
+      tag: "v3.31.4"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      imgproxy (image transformation for Storage).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-supabase-postgres-meta
+    display_name: "Vendor Supabase postgres-meta"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: supabase/postgres-meta
+      # #ASSUME docker.io/supabase/postgres-meta:v0.100.0 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/supabase/postgres-meta:v0.100.0`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "v0.100.0"
+      digest: "sha256:145325b7e39f8ef4931d6e8cfd3f6f4d655de09d72a2ccc96d9513542c2202bd"
+    ghcr:
+      name: vendor-supabase-postgres-meta
+      tag: "v0.100.0"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      postgres-meta (database metadata API used by Studio).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-supabase-edge-runtime
+    display_name: "Vendor Supabase Edge Runtime"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: supabase/edge-runtime
+      # #ASSUME docker.io/supabase/edge-runtime:v1.77.4 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/supabase/edge-runtime:v1.77.4`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "v1.77.4"
+      digest: "sha256:ad45164b7548bf5820ed7be714789c17ac2865edce79a09cfb4c3756c3d365a8"
+    ghcr:
+      name: vendor-supabase-edge-runtime
+      tag: "v1.77.4"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      Supabase Edge Runtime (Edge Functions).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-supabase-postgres
+    display_name: "Vendor Supabase Postgres"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: supabase/postgres
+      # #ASSUME docker.io/supabase/postgres:17.6.1.136 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/supabase/postgres:17.6.1.136`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "17.6.1.136"
+      digest: "sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00"
+    ghcr:
+      name: vendor-supabase-postgres
+      tag: "17.6.1.136"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      Supabase Postgres 17 (Postgres with the Supabase extension set).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.
+
+  - id: vendor-supabase-supavisor
+    display_name: "Vendor Supabase Supavisor"
+    source_tier: vendor
+    criticality: medium
+    classification_status: classified
+    disposition: mirror_only
+    image_modification:
+      strategy: mirror_only
+    upstream:
+      registry: docker.io
+      name: supabase/supavisor
+      # #ASSUME docker.io/supabase/supavisor:2.9.13 is an immutable release tag and the
+      # digest below is the reviewed index for it.
+      # #VERIFY run `crane digest docker.io/supabase/supavisor:2.9.13`; a different value
+      # means upstream re-pushed the tag. Re-review before updating the digest.
+      tag: "2.9.13"
+      digest: "sha256:07f1a6098ffc04b80263bca4eb5c3e7bd2e03dfd1fc465aa108d7329000a1a4e"
+    ghcr:
+      name: vendor-supabase-supavisor
+      tag: "2.9.13"
+    platform_compatibility:
+      default: linux/amd64
+      supported: [linux/amd64]
+    notes: >-
+      Supavisor (Postgres connection pooler).
+      Consumed by the CYO Supabase self-host stack (ADR-032).
+      Transport copy of upstream, not hardened.

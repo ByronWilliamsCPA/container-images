@@ -12,9 +12,11 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import build_matrix  # noqa: E402
+import validate_catalog_schema  # noqa: E402
 from build_matrix import build_include, resolve_output_path  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -78,6 +80,25 @@ def _full_image() -> dict:
     }
 
 
+def _vendor_image() -> dict:
+    return {
+        "id": "vendor-supabase-gotrue",
+        "source_tier": "vendor",
+        "criticality": "medium",
+        "upstream": {
+            "registry": "docker.io",
+            "name": "supabase/gotrue",
+            "tag": "v2.197.0",
+            "digest": "sha256:" + "c" * 64,
+        },
+        "ghcr": {"name": "vendor-supabase-gotrue", "tag": "v2.197.0"},
+        "platform_compatibility": {
+            "default": "linux/amd64",
+            "supported": ["linux/amd64"],
+        },
+    }
+
+
 class TestBuildInclude:
     def test_maps_all_fields(self):
         row = build_include(_full_image())
@@ -100,6 +121,29 @@ class TestBuildInclude:
         row = build_include(img)
         assert row["platform"] == "linux/amd64"
         assert row["criticality"] == "low"
+
+    def test_digest_not_emitted_by_default(self):
+        """Primary and distroless rows are unchanged: no upstream_digest key."""
+        img = _full_image()
+        img["upstream"]["digest"] = "sha256:" + "d" * 64
+        assert "upstream_digest" not in build_include(img)
+
+    def test_vendor_row_carries_upstream_digest(self):
+        row = build_include(_vendor_image(), with_digest=True)
+        assert row["upstream_digest"] == "sha256:" + "c" * 64
+        assert row["upstream_registry"] == "docker.io"
+        assert row["upstream_name"] == "supabase/gotrue"
+        assert row["ghcr_name"] == "vendor-supabase-gotrue"
+
+    def test_vendor_row_without_digest_exits_with_message(self, capsys):
+        img = _vendor_image()
+        del img["upstream"]["digest"]
+        with pytest.raises(SystemExit) as exc_info:
+            build_include(img, with_digest=True)
+        assert exc_info.value.code == 1
+        stderr = capsys.readouterr().err
+        assert "vendor-supabase-gotrue" in stderr
+        assert "digest" in stderr
 
     @pytest.mark.parametrize(
         "delete_path,expected_id",
@@ -154,6 +198,8 @@ class TestMain:
         assert "distroless_matrix=" in out
         assert "dhi_count=0" in out
         assert "distroless_count=0" in out
+        assert 'vendor_matrix={"include":[]}' in out
+        assert "vendor_count=0" in out
 
     def test_writes_to_github_output_file(self, tmp_path, monkeypatch):
         p = tmp_path / "images.yaml"
@@ -165,6 +211,7 @@ class TestMain:
         content = out_file.read_text()
         assert "dhi_matrix=" in content
         assert "distroless_matrix=" in content
+        assert "vendor_matrix=" in content
 
     def test_splits_primary_and_distroless(self, tmp_path, monkeypatch, capsys):
         catalog_yaml = textwrap.dedent("""\
@@ -198,3 +245,77 @@ class TestMain:
         assert json.loads(parsed["distroless_matrix"])["include"][0]["id"] == "dl-base"
         assert parsed["dhi_count"] == "1"
         assert parsed["distroless_count"] == "1"
+
+    def test_vendor_routed_to_vendor_matrix(self, tmp_path, monkeypatch, capsys):
+        """Vendor entries land only in vendor_matrix, with the digest emitted."""
+        catalog = {
+            "images": [
+                {
+                    "id": "dhi-alpha",
+                    "source_tier": "primary",
+                    "criticality": "high",
+                    "upstream": {"registry": "dhi.io", "name": "alpha", "tag": "1"},
+                    "ghcr": {"name": "dhi-alpha", "tag": "1"},
+                },
+                _vendor_image(),
+            ]
+        }
+        parsed = self._run_main(tmp_path, monkeypatch, capsys, catalog)
+        vendor_rows = json.loads(parsed["vendor_matrix"])["include"]
+        assert [r["id"] for r in vendor_rows] == ["vendor-supabase-gotrue"]
+        assert vendor_rows[0]["upstream_digest"] == "sha256:" + "c" * 64
+        dhi_rows = json.loads(parsed["dhi_matrix"])["include"]
+        assert [r["id"] for r in dhi_rows] == ["dhi-alpha"]
+        assert "upstream_digest" not in dhi_rows[0]
+        assert json.loads(parsed["distroless_matrix"]) == {"include": []}
+        assert parsed["vendor_count"] == "1"
+        assert parsed["dhi_count"] == "1"
+        assert parsed["distroless_count"] == "0"
+
+    def test_vendor_matrix_is_single_line_json(self, tmp_path, monkeypatch, capsys):
+        """GITHUB_OUTPUT is line-oriented; the matrix must not span lines."""
+        parsed = self._run_main(
+            tmp_path, monkeypatch, capsys, {"images": [_vendor_image()]}
+        )
+        assert "\n" not in parsed["vendor_matrix"]
+        assert json.loads(parsed["vendor_matrix"])["include"]
+
+    @pytest.mark.parametrize("tier", ["bogus", None, ["vendor"]])
+    def test_unknown_tier_exits_instead_of_being_dropped(
+        self, tier, tmp_path, monkeypatch, capsys
+    ):
+        img = _full_image()
+        if tier is not None:
+            img["source_tier"] = tier
+        p = tmp_path / "images.yaml"
+        p.write_text(yaml.safe_dump({"images": [img]}))
+        monkeypatch.setattr(build_matrix, "CATALOG_PATH", p)
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+        with pytest.raises(SystemExit) as exc_info:
+            build_matrix.main()
+        assert exc_info.value.code == 1
+        stderr = capsys.readouterr().err
+        assert "source_tier" in stderr
+        assert "dhi-test" in stderr
+
+    def test_every_schema_tier_has_a_matrix(self):
+        """Adding a tier to the validator without routing it here must fail CI."""
+        assert (
+            set(build_matrix.TIER_OUTPUTS)
+            == validate_catalog_schema.ALLOWED_SOURCE_TIERS
+        )
+
+    @staticmethod
+    def _run_main(tmp_path, monkeypatch, capsys, catalog: dict) -> dict[str, str]:
+        p = tmp_path / "images.yaml"
+        p.write_text(yaml.safe_dump(catalog))
+        monkeypatch.setattr(build_matrix, "CATALOG_PATH", p)
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+        build_matrix.main()
+        out = capsys.readouterr().out
+        return {
+            k: v
+            for line in out.splitlines()
+            if "=" in line
+            for k, v in [line.split("=", 1)]
+        }
