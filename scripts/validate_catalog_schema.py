@@ -40,7 +40,7 @@ REQUIRED_IMAGE_FIELDS = {
     "ghcr",
     "platform_compatibility",
 }
-ALLOWED_SOURCE_TIERS = {"primary", "distroless"}
+ALLOWED_SOURCE_TIERS = {"primary", "distroless", "vendor"}
 ALLOWED_CRITICALITY = {"critical", "high", "medium", "low"}
 ALLOWED_CLASSIFICATION_STATUS = {"classified", "pending"}
 ALLOWED_DISPOSITION = {
@@ -62,9 +62,21 @@ REQUIRED_UPSTREAM_FIELDS = {"registry", "name", "tag"}
 REQUIRED_GHCR_FIELDS = {"name", "tag"}
 REQUIRED_PLATFORM_FIELDS = {"default", "supported"}
 
-# RT-2: only these registries may feed the mirror. Anything else (a typo,
-# a look-alike, or an attacker-controlled host) is rejected outright.
-ALLOWED_REGISTRIES = {"dhi.io", "gcr.io"}
+# RT-2: only these registries may feed the mirror, and each source tier has
+# exactly one. Anything else (a typo, a look-alike, an attacker-controlled
+# host, or a tier pointed at another tier's registry) is rejected outright.
+# A vendor entry cannot be smuggled in as a hardened-base mirror, or the
+# reverse, by choosing a registry that the other tier owns.
+TIER_REGISTRIES: dict[str, frozenset[str]] = {
+    "primary": frozenset({"dhi.io"}),
+    "distroless": frozenset({"gcr.io"}),
+    "vendor": frozenset({"docker.io"}),
+}
+
+# Tiers whose upstream is third-party application software rather than a
+# hardened base. Their bytes are copied as published, so the entry MUST pin
+# an immutable digest and MUST NOT track a floating tag.
+DIGEST_REQUIRED_TIERS = frozenset({"vendor"})
 
 # RT-6: a floating tag is not a durable pin. When upstream.tag is one of these,
 # the entry MUST also carry an upstream.digest so the mirror copies exactly the
@@ -91,6 +103,11 @@ _UPSTREAM_NAME_RE = re.compile(
 _GHCR_NAME_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 # OCI tag grammar: [A-Za-z0-9_][A-Za-z0-9._-]{0,127}.
 _TAG_RE = re.compile(r"^\w[\w._-]{0,127}$", re.ASCII)
+# Docker Hub repositories are always <namespace>/<repo> (official images live
+# under library/). A bare name or a deeper path is not a Hub repository.
+_DOCKER_HUB_NAME_RE = re.compile(
+    r"^[a-z0-9]+(?:[._-][a-z0-9]+)*/[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+)
 # Manifest/index digest.
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -123,7 +140,9 @@ def _validate_enum_field(
 ) -> list[str]:
     """Validate that an image's enum field holds an allowed value."""
     value = img.get(field, "")
-    if value in allowed:
+    # isinstance guard: an unhashable YAML value (a list or mapping) would raise
+    # TypeError in the set lookup instead of producing a validation error.
+    if isinstance(value, str) and value in allowed:
         return []
     return [
         error(f"invalid {field} {value!r}; must be one of {sorted(allowed)}", img_id)
@@ -147,54 +166,102 @@ def _validate_image_modification(img: dict[str, Any], img_id: str) -> list[str]:
     ]
 
 
-def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
-    """Validate the upstream mapping: required fields, value shapes, digest pin."""
-    upstream = img.get("upstream", {})
-    if not isinstance(upstream, dict):
-        return [error("upstream must be a mapping", img_id)]
+def _allowed_registries(tier: str | None) -> frozenset[str]:
+    """Registries a source tier may use; every tier's set for an unknown tier.
 
-    errors = [
-        error(f"upstream missing required field: {field!r}", img_id)
-        for field in sorted(REQUIRED_UPSTREAM_FIELDS - set(upstream.keys()))
+    An invalid source_tier is reported by the enum check; falling back to the
+    union here keeps that single mistake from also raising a registry error.
+    """
+    if tier in TIER_REGISTRIES:
+        return TIER_REGISTRIES[tier]
+    return frozenset().union(*TIER_REGISTRIES.values())
+
+
+def _validate_upstream_registry(
+    upstream: dict[str, Any], tier: str | None, img_id: str
+) -> list[str]:
+    """Validate upstream.registry against the registries its tier may use."""
+    registry = upstream.get("registry")
+    allowed = _allowed_registries(tier)
+    if registry in allowed:
+        return []
+    scope = f" for source_tier {tier!r}" if tier in TIER_REGISTRIES else ""
+    return [
+        error(
+            f"upstream.registry {registry!r} is not allowed{scope}; "
+            f"must be one of {sorted(allowed)}",
+            img_id,
+        )
     ]
 
-    registry = upstream.get("registry")
-    if registry not in ALLOWED_REGISTRIES:
-        errors.append(
-            error(
-                f"upstream.registry {registry!r} is not allowed; "
-                f"must be one of {sorted(ALLOWED_REGISTRIES)}",
-                img_id,
-            )
-        )
 
+def _validate_upstream_name(upstream: dict[str, Any], img_id: str) -> list[str]:
+    """Validate upstream.name, applying Docker Hub's <namespace>/<repo> shape."""
     name = upstream.get("name")
     if not _matches(_UPSTREAM_NAME_RE, name):
-        errors.append(
+        return [
             error(
                 f"upstream.name {name!r} is not a valid image path "
                 "(lowercase segments, no traversal)",
                 img_id,
             )
-        )
+        ]
+    if upstream.get("registry") == "docker.io" and not _matches(
+        _DOCKER_HUB_NAME_RE, name
+    ):
+        return [
+            error(
+                f"upstream.name {name!r} is not a Docker Hub repository; "
+                "expected <namespace>/<repo>",
+                img_id,
+            )
+        ]
+    return []
+
+
+def _validate_upstream_pin(
+    upstream: dict[str, Any], tier: str | None, img_id: str
+) -> list[str]:
+    """Validate upstream.tag and upstream.digest, including the pin rules."""
+    errors: list[str] = []
 
     tag = upstream.get("tag")
     if not _matches(_TAG_RE, tag):
         errors.append(error(f"upstream.tag {tag!r} is not a valid tag", img_id))
 
     digest = upstream.get("digest")
-    if digest is not None and not _matches(_DIGEST_RE, digest):
+    digest_ok = _matches(_DIGEST_RE, digest)
+    if digest is not None and not digest_ok:
         errors.append(
             error(f"upstream.digest {digest!r} must be sha256:<64 hex>", img_id)
         )
 
-    # RT-6: a floating tag drifts after review. Require an explicit digest so the
-    # mirror copies exactly the bytes vetted here, never whatever 'latest' becomes.
-    if (
-        isinstance(tag, str)
-        and tag.lower() in MUTABLE_TAGS
-        and not _matches(_DIGEST_RE, digest)
-    ):
+    is_mutable = isinstance(tag, str) and tag.lower() in MUTABLE_TAGS
+
+    if tier in DIGEST_REQUIRED_TIERS:
+        # Vendor images are third-party software copied as published. The
+        # digest is the pin of record whatever the tag says, and a floating tag
+        # would publish a moving target under this org's namespace.
+        if is_mutable:
+            errors.append(
+                error(
+                    f"upstream.tag {tag!r} is mutable and not allowed for "
+                    f"source_tier {tier!r}; use an immutable version tag",
+                    img_id,
+                )
+            )
+        if digest is None:
+            errors.append(
+                error(
+                    f"upstream.digest is required for source_tier {tier!r} "
+                    "(sha256:<64 hex>)",
+                    img_id,
+                )
+            )
+    elif is_mutable and not digest_ok:
+        # RT-6: a floating tag drifts after review. Require an explicit digest
+        # so the mirror copies exactly the bytes vetted here, never whatever
+        # 'latest' becomes.
         errors.append(
             error(
                 f"upstream.tag {tag!r} is mutable; pin upstream.digest "
@@ -202,7 +269,26 @@ def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
                 img_id,
             )
         )
+    return errors
 
+
+def _validate_upstream(img: dict[str, Any], img_id: str) -> list[str]:
+    """Validate the upstream mapping: required fields, value shapes, digest pin."""
+    upstream = img.get("upstream", {})
+    if not isinstance(upstream, dict):
+        return [error("upstream must be a mapping", img_id)]
+
+    # A non-string tier (e.g. a YAML list) is reported by the enum check; here
+    # it is treated as unknown so the set lookups below cannot raise TypeError.
+    raw_tier = img.get("source_tier")
+    tier = raw_tier if isinstance(raw_tier, str) else None
+    errors = [
+        error(f"upstream missing required field: {field!r}", img_id)
+        for field in sorted(REQUIRED_UPSTREAM_FIELDS - set(upstream.keys()))
+    ]
+    errors.extend(_validate_upstream_registry(upstream, tier, img_id))
+    errors.extend(_validate_upstream_name(upstream, img_id))
+    errors.extend(_validate_upstream_pin(upstream, tier, img_id))
     return errors
 
 
