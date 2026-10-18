@@ -1,9 +1,14 @@
 # Container Images Mirror
 
 Public mirror of hardened container images from Docker Hardened Images (DHI)
-and Google Distroless, hosted on GitHub Container Registry (GHCR).
+and Google Distroless, plus a small set of third-party vendor application images
+from Docker Hub, hosted on GitHub Container Registry (GHCR).
 
 All images are publicly pullable with no authentication required.
+
+Three source tiers, three prefixes, three different promises. Do not read a
+`vendor-*` image as hardened because it sits in the same namespace as a `dhi-*`
+one; see [Hardened-base mirrors versus vendor mirrors](#hardened-base-mirrors-versus-vendor-mirrors).
 
 ## Available images
 
@@ -50,6 +55,29 @@ manager. Best used as the final stage in multi-stage builds.
 | `ghcr.io/byronwilliamscpa/distroless-nodejs20` | `latest` | Node.js 20 production runtime |
 | `ghcr.io/byronwilliamscpa/distroless-static` | `latest` | Static binaries (Go, Rust) |
 
+### Vendor images (`vendor-*`)
+
+Third-party application images sourced from Docker Hub (`docker.io`), mirrored
+for the CYO Supabase self-host stack (ADR-032). **These are transport copies of
+upstream, not hardened images.** They are pinned by digest in the catalog, scanned
+by the same gate as every other image, and otherwise published as upstream built
+them. Each tag is the upstream tag, and each image is a multi-arch index
+(`linux/amd64` and `linux/arm64`).
+
+| Image | Tag | Upstream |
+| --- | --- | --- |
+| `ghcr.io/byronwilliamscpa/vendor-supabase-studio` | `2026.10.12-sha-3699278` | `supabase/studio` |
+| `ghcr.io/byronwilliamscpa/vendor-envoy` | `v1.39.1` | `envoyproxy/envoy` |
+| `ghcr.io/byronwilliamscpa/vendor-supabase-gotrue` | `v2.197.0` | `supabase/gotrue` |
+| `ghcr.io/byronwilliamscpa/vendor-postgrest` | `v14.18` | `postgrest/postgrest` |
+| `ghcr.io/byronwilliamscpa/vendor-supabase-realtime` | `v2.143.3` | `supabase/realtime` |
+| `ghcr.io/byronwilliamscpa/vendor-supabase-storage-api` | `v1.81.0` | `supabase/storage-api` |
+| `ghcr.io/byronwilliamscpa/vendor-imgproxy` | `v3.31.4` | `darthsim/imgproxy` |
+| `ghcr.io/byronwilliamscpa/vendor-supabase-postgres-meta` | `v0.100.0` | `supabase/postgres-meta` |
+| `ghcr.io/byronwilliamscpa/vendor-supabase-edge-runtime` | `v1.77.4` | `supabase/edge-runtime` |
+| `ghcr.io/byronwilliamscpa/vendor-supabase-postgres` | `17.6.1.136` | `supabase/postgres` |
+| `ghcr.io/byronwilliamscpa/vendor-supabase-supavisor` | `2.9.13` | `supabase/supavisor` |
+
 ## Usage
 
 No authentication required:
@@ -57,6 +85,7 @@ No authentication required:
 ```bash
 docker pull ghcr.io/byronwilliamscpa/dhi-postgres:16-debian13
 docker pull ghcr.io/byronwilliamscpa/distroless-python3:latest
+docker pull ghcr.io/byronwilliamscpa/vendor-supabase-gotrue:v2.197.0
 ```
 
 In a Dockerfile:
@@ -76,10 +105,44 @@ repository. Manual trigger is available via GitHub Actions workflow dispatch.
 
 ## Security
 
-Every DHI image in this mirror carries:
+Every DHI image in this mirror carries (vendor and distroless images do not):
 
 - SLSA Level 3 provenance (from DHI upstream)
 - AMD64; ARM64 planned
+
+### Hardened-base mirrors versus vendor mirrors
+
+The catalog's `source_tier` says what a mirrored image is, and the validator
+enforces a different rule set per tier (ADR-032).
+
+| Tier | Prefix | Upstream | What it means | Pin |
+| --- | --- | --- | --- | --- |
+| `primary` | `dhi-*` | `dhi.io` | Docker Hardened Images base: minimal, CIS-hardened, upstream-maintained | tag, resolved per run |
+| `distroless` | `distroless-*` | `gcr.io` | Google Distroless: no shell, no package manager | tag, optional digest |
+| `vendor` | `vendor-*` | `docker.io` | A third party's application image, copied as published | immutable tag **and** required digest |
+
+- **RT-2, per-tier registries.** Each tier may use exactly one registry. A
+  `vendor` entry cannot point at `dhi.io`, and a `primary` entry cannot point at
+  `docker.io`, so an application image cannot be passed off as a hardened base by
+  picking the other tier's registry.
+- **RT-6, digest pin is mandatory for vendor.** A floating tag is refused
+  outright for the tier, and `upstream.digest` is required whatever the tag says.
+  The mirror copies that exact digest (`crane copy SRC@DIGEST TGT`) and asserts
+  the target digest matches. If upstream re-pushes a tag, the mirror keeps serving
+  the reviewed digest and the run warns, rather than silently following the tag.
+- **RT-4, same scan gate.** Vendor images go through the same Trivy gate as the
+  other tiers, before the copy, with thresholds from `catalog/policies.yaml`.
+  There are no vendor-specific ignores. A vendor image with a fixable
+  CRITICAL or HIGH finding is held back like any other.
+- **RT-1, no upstream signature check.** Docker Hub vendor images are mostly
+  unsigned and no signer has been confirmed for any of them. The run summary says
+  "upstream signature NOT verified" for every vendor leg. Vendor signing has its
+  own switch (`MIRROR_VENDOR_SIGNING_ENABLED`, currently `false`) in addition to
+  `MIRROR_SIGNING_ENABLED`, so lifting RT-1 for the other tiers cannot sign
+  unverified vendor bytes.
+
+A `vendor-*` image carries upstream's CVE posture and upstream's base image. The
+mirror contributes a digest pin, a scan gate and an SBOM, not hardening.
 
 ### Scanning gates promotion
 
@@ -123,6 +186,10 @@ mutable tag and moves on any run that passes.
 > Treat the whole namespace as unsigned until `docs/rt1-signing-exit.md` says
 > otherwise, and confirm by querying the registry rather than by reading a
 > green workflow run.
+>
+> **`vendor-*` images are unsigned too, and stay so independently of RT-1.**
+> Signing them is behind `MIRROR_VENDOR_SIGNING_ENABLED` (currently `false`) as
+> well, because no upstream signer for Docker Hub application images is verified.
 >
 > **Next review: 2026-11-24.** The migration plan, per-entry readiness, and the
 > three blockers are in [`docs/rt1-signing-exit.md`](docs/rt1-signing-exit.md).
