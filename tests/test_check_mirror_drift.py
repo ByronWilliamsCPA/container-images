@@ -248,3 +248,70 @@ class TestCheckPins:
         """A failed registry query is missing evidence, not evidence of drift."""
         monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: None)
         assert check_mirror_drift.check_pins([self._entry(PIN)]) == []
+
+
+# ---------------------------------------------------------------------------
+# check_staleness: vendor entries are mirrored by pinned index digest
+# ---------------------------------------------------------------------------
+
+
+class TestCheckStalenessVendor:
+    @staticmethod
+    def _entry(tier):
+        return {
+            "id": "vendor-supabase-gotrue",
+            "source": "docker.io/supabase/gotrue:v2.197.0",
+            "target": "ghcr.io/byronwilliamscpa/vendor-supabase-gotrue:v2.197.0",
+            "platform": "linux/amd64",
+            "tier": tier,
+            "pin": PIN,
+        }
+
+    def test_vendor_mirror_matching_pin_is_current(self, monkeypatch):
+        """The mirror holds the index; the pin is the expected index digest."""
+        calls: list[list[str]] = []
+
+        def fake(args):
+            calls.append(args)
+            return PIN if args[1].startswith("ghcr.io") else OTHER
+
+        monkeypatch.setattr(check_mirror_drift, "run_crane", fake)
+        stale, unchecked = check_mirror_drift.check_staleness([self._entry("vendor")])
+        assert (stale, unchecked) == ([], [])
+        assert all("--platform" not in c for c in calls)
+
+    def test_vendor_mirror_not_matching_pin_is_stale(self, monkeypatch):
+        monkeypatch.setattr(check_mirror_drift, "run_crane", lambda a: OTHER)
+        stale, _ = check_mirror_drift.check_staleness([self._entry("vendor")])
+        assert [s[0] for s in stale] == ["vendor-supabase-gotrue"]
+
+    def test_non_vendor_still_compares_platform_digest(self, monkeypatch):
+        """Primary and distroless behaviour is unchanged."""
+        monkeypatch.setattr(
+            check_mirror_drift,
+            "run_crane",
+            lambda a: OTHER if "--platform" in a else PIN,
+        )
+        stale, _ = check_mirror_drift.check_staleness([self._entry("primary")])
+        assert len(stale) == 1
+
+    def test_tier_is_parsed_from_catalog(self, tmp_path: Path):
+        path = tmp_path / "images.yaml"
+        path.write_text(
+            textwrap.dedent(
+                f"""
+                images:
+                  - id: vendor-x
+                    source_tier: vendor
+                    upstream:
+                      registry: docker.io
+                      name: ns/x
+                      tag: "1.0"
+                      digest: "{PIN}"
+                    ghcr: {{name: vendor-x, tag: "1.0"}}
+                """
+            )
+        )
+        entry = parse_catalog(path)[0]
+        assert entry["tier"] == "vendor"
+        assert entry["source"] == "docker.io/ns/x:1.0"

@@ -154,6 +154,7 @@ def parse_catalog(path: Path) -> list[dict]:
                 "ghcr_name": img["ghcr"]["name"],
                 "ghcr_tag": str(img["ghcr"]["tag"]),
                 "platform": platform,
+                "tier": img.get("source_tier"),
                 "pin": img["upstream"].get("digest"),
             }
         )
@@ -163,11 +164,16 @@ def parse_catalog(path: Path) -> list[dict]:
 def check_pins(entries: list[dict]) -> list[tuple]:
     """Report catalog `upstream.digest` pins that no longer resolve.
 
-    These pins are documentation: build_matrix.py does not emit the field, so
-    the mirror copies by tag and never reads them. A pin nobody reads still
-    rots, and a rotted pin next to a `#VERIFY` marker reads as a verified fact
-    when it is the opposite. Accept either the index digest or the
-    platform digest, since the catalog does not say which one was recorded.
+    For primary and distroless entries these pins are documentation:
+    build_matrix.py does not emit the field, so the mirror copies by tag and
+    never reads them. A pin nobody reads still rots, and a rotted pin next to a
+    `#VERIFY` marker reads as a verified fact when it is the opposite. Vendor
+    entries are different: the mirror copies exactly the pinned digest, so a
+    pin that no longer matches the upstream tag means the tag was re-pushed and
+    the mirror is serving the older, reviewed bytes.
+
+    Accept either the index digest or the platform digest, since the catalog
+    does not say which one was recorded.
     """
     drifted = []
     for entry in (e for e in entries if e["pin"]):
@@ -182,10 +188,22 @@ def check_pins(entries: list[dict]) -> list[tuple]:
 
 
 def check_staleness(entries: list[dict]) -> tuple[list[tuple], list[str]]:
-    """Compare each entry's upstream platform digest against the mirror's."""
+    """Compare each entry's upstream platform digest against the mirror's.
+
+    Vendor entries are mirrored by their pinned index digest, so the expected
+    mirror digest is the catalog pin itself. Resolving the tag per platform
+    would compare a platform manifest against the mirrored index and report
+    every multi-arch vendor image as stale. Upstream re-pushing the tag is
+    reported by check_pins instead.
+    """
     stale, unchecked = [], []
     for entry in entries:
-        source = run_crane(["digest", entry["source"], "--platform", entry["platform"]])
+        if entry.get("tier") == "vendor" and entry["pin"]:
+            source = entry["pin"]
+        else:
+            source = run_crane(
+                ["digest", entry["source"], "--platform", entry["platform"]]
+            )
         target = run_crane(["digest", entry["target"]])
         if source is None or target is None:
             unchecked.append(entry["id"])
