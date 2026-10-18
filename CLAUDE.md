@@ -24,8 +24,9 @@ Source tiers (`source_tier`), each limited to one upstream registry by the valid
 | `distroless` | `gcr.io` | `distroless-*` | Google distroless |
 | `vendor` | `docker.io` | `vendor-*` | Third-party app image, transport copy, NOT hardened |
 
-`vendor` entries require an immutable tag plus `upstream.digest`, and the
-`mirror-vendor` job copies that digest. Never describe a `vendor-*` image as hardened.
+`vendor` entries require an immutable tag plus `upstream.digest` (the multi-arch index
+digest). The `mirror-vendor` job resolves the `linux/amd64` manifest from that index,
+scans it and copies that one platform by digest, like the other tiers. Never describe a `vendor-*` image as hardened.
 
 Active phases:
 - A0 (catalog schema and matrix builder): complete
@@ -87,8 +88,9 @@ Changes to `.github/workflows/mirror-hardened-images.yml` must preserve:
   overwrite each other's alerts)
 - Cosign signing step
 - SBOM attestation step
-- the `mirror-vendor` job copying by the catalog digest (`crane copy SRC@DIGEST TGT`)
-  with the same gate and policy loading as the other jobs, and no vendor-specific
+- the `mirror-vendor` job scanning and copying the single platform manifest resolved
+  from the catalog's pinned index digest (`crane copy SRC@DIGEST TGT`), never the whole
+  index, with the same gate and policy loading as the other jobs and no vendor-specific
   scanner ignores
 
 RT-1 (mirror signing disabled) has an owner, an exit plan and a review date in

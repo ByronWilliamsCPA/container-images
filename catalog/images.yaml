@@ -770,15 +770,20 @@ images:
   #
   # Rules for this tier (enforced by scripts/validate_catalog_schema.py):
   #   - upstream.registry is docker.io, upstream.name is <namespace>/<repo>
-  #   - upstream.digest is REQUIRED and is the pin of record; the mirror copies
-  #     that exact multi-arch index digest and never resolves the tag
+  #   - upstream.digest is REQUIRED and is the pin of record. It is the upstream
+  #     multi-arch INDEX digest; the mirror resolves the platform_compatibility
+  #     .default child manifest from it (an index immutably determines its
+  #     children), scans and copies that one manifest, and never follows the tag
   #   - upstream.tag is an immutable version tag, never latest/stable/edge/...
-  #   - ghcr.name is vendor-<component>, ghcr.tag keeps the upstream tag
+  #   - ghcr.name starts with vendor- (and no other tier may use that prefix),
+  #     ghcr.tag keeps the upstream tag
   #
   # Pins taken from github.com/supabase/supabase docker/docker-compose.yml as
   # of 2026-10-18; each digest was re-resolved with `crane digest` that day.
-  # All eleven are OCI image indexes carrying linux/amd64 and linux/arm64; the
-  # whole index is copied, so both platforms are published.
+  # All eleven upstream tags are OCI image indexes carrying linux/amd64 and
+  # linux/arm64. Like every other tier, only ONE platform is published
+  # (linux/amd64): it is the manifest the Trivy gate and Syft actually inspect
+  # on the amd64 runner, so no unscanned architecture reaches GHCR.
 
   - id: vendor-supabase-studio
     display_name: "Vendor Supabase Studio"
@@ -802,7 +807,7 @@ images:
       tag: "2026.10.12-sha-3699278"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       Supabase Studio (dashboard and SQL editor UI).
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -830,7 +835,7 @@ images:
       tag: "v1.39.1"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       Envoy proxy (API gateway in front of the Supabase services).
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -858,7 +863,7 @@ images:
       tag: "v2.197.0"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       Supabase Auth (GoTrue).
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -886,7 +891,7 @@ images:
       tag: "v14.18"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       PostgREST (REST API over Postgres).
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -914,7 +919,7 @@ images:
       tag: "v2.143.3"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       Supabase Realtime (websocket change feed).
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -942,7 +947,7 @@ images:
       tag: "v1.81.0"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       Supabase Storage API.
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -970,7 +975,7 @@ images:
       tag: "v3.31.4"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       imgproxy (image transformation for Storage).
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -998,7 +1003,7 @@ images:
       tag: "v0.100.0"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       postgres-meta (database metadata API used by Studio).
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -1026,7 +1031,7 @@ images:
       tag: "v1.77.4"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       Supabase Edge Runtime (Edge Functions).
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -1054,7 +1059,7 @@ images:
       tag: "17.6.1.136"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       Supabase Postgres 17 (Postgres with the Supabase extension set).
       Consumed by the CYO Supabase self-host stack (ADR-032).
@@ -1082,7 +1087,7 @@ images:
       tag: "2.9.13"
     platform_compatibility:
       default: linux/amd64
-      supported: [linux/amd64, linux/arm64]
+      supported: [linux/amd64]
     notes: >-
       Supavisor (Postgres connection pooler).
       Consumed by the CYO Supabase self-host stack (ADR-032).

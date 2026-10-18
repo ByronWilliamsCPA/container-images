@@ -61,8 +61,10 @@ Third-party application images sourced from Docker Hub (`docker.io`), mirrored
 for the CYO Supabase self-host stack (ADR-032). **These are transport copies of
 upstream, not hardened images.** They are pinned by digest in the catalog, scanned
 by the same gate as every other image, and otherwise published as upstream built
-them. Each tag is the upstream tag, and each image is a multi-arch index
-(`linux/amd64` and `linux/arm64`).
+them. Each tag is the upstream tag. Like every image in this mirror, only
+`linux/amd64` is published: it is the platform the scan gate inspects, so no
+architecture reaches GHCR unscanned. Upstream also builds `linux/arm64`; that is
+not mirrored.
 
 | Image | Tag | Upstream |
 | --- | --- | --- |
@@ -127,8 +129,9 @@ enforces a different rule set per tier (ADR-032).
   picking the other tier's registry.
 - **RT-6, digest pin is mandatory for vendor.** A floating tag is refused
   outright for the tier, and `upstream.digest` is required whatever the tag says.
-  The mirror copies that exact digest (`crane copy SRC@DIGEST TGT`) and asserts
-  the target digest matches. If upstream re-pushes a tag, the mirror keeps serving
+  The pin is the upstream multi-arch index digest. The mirror resolves the
+  `linux/amd64` manifest from that index, scans it, copies it by digest
+  (`crane copy SRC@DIGEST TGT`) and asserts the target digest matches. If upstream re-pushes a tag, the mirror keeps serving
   the reviewed digest and the run warns, rather than silently following the tag.
 - **RT-4, same scan gate.** Vendor images go through the same Trivy gate as the
   other tiers, before the copy, with thresholds from `catalog/policies.yaml`.

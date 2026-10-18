@@ -94,7 +94,7 @@ def _vendor_image() -> dict:
         "ghcr": {"name": "vendor-supabase-gotrue", "tag": "v2.197.0"},
         "platform_compatibility": {
             "default": "linux/amd64",
-            "supported": ["linux/amd64", "linux/arm64"],
+            "supported": ["linux/amd64"],
         },
     }
 
