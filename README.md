@@ -167,6 +167,11 @@ in [`catalog/policies.yaml`](catalog/policies.yaml). Exceptions require a
 justification, a ticket, and an expiry date, and revert to blocking the moment
 they lapse.
 
+The Trivy gate also fails on **secrets** (for example a bundled private key), and
+`--ignore-unfixed` does not apply to them. A `secret_exceptions` entry names one
+rule and one exact absolute path, never a glob, and carries the same expiry and
+ticket requirements. It applies to the vendor tier only.
+
 **Pin by digest.** A gated tag stops advancing on a bad scan, but it is still a
 mutable tag and moves on any run that passes.
 

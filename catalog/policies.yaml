@@ -5,7 +5,7 @@ metadata:
   schema_version: "1.0"
   description: Scanner and exception policies for the A2 image promotion pipeline
   maintainer: ByronWilliamsCPA/container-images
-  last_updated: "2026-10-18"
+  last_updated: "2026-10-19"
 
 # Vulnerability scanner policy applied by publish-approved-image.yml (A2).
 # scripts/load_scanner_policy.py reads this file at promotion time and
@@ -125,6 +125,21 @@ scanner_policy:
 # refuse to carry forward entries for CVEs that were never reviewed against the new
 # bytes. Vendor-tier exceptions (vendor-*) are transport-copy exceptions: we cannot
 # patch those bytes, so each carries a short expiry and a tracking issue.
+#
+# Secret exceptions (secret_exceptions, below the CVE list) follow the same expiry,
+# ticket and re-pin rules but are narrower: one entry names ONE rule and ONE exact
+# absolute file path inside the image. Globs, relative paths and ".." segments are
+# rejected by the loader, so a finding in any other file still blocks. They are
+# rendered into a generated YAML ignore file (Trivy 0.70 `secrets:` section) only
+# for vendor promotion; other tiers never receive them.
+#
+# Secret schema:
+#   image_id:      str  -- matches catalog/images.yaml id field
+#   rule_id:       str  -- Trivy secret rule id (e.g. private-key)
+#   path:          str  -- exact absolute path inside the image, leading slash
+#   expires:       str  -- ISO-8601 date after which the exception auto-expires
+#   ticket:        str  -- issue URL tracking the underlying fix
+#   justification: str  -- why the file is not a usable credential at runtime
 exceptions:
   - image_id: vendor-supabase-edge-runtime
     cve_id: CVE-2026-13221
@@ -1376,6 +1391,15 @@ exceptions:
     justification: >-
       Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
       Packages: pacote. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-77214
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat. Published after the 2026-10-18 scan; found by the first CI gate run.
+      Not reachability-analysed.
   - image_id: vendor-supabase-studio
     cve_id: CVE-2026-102828
     scanner: trivy
@@ -2479,3 +2503,72 @@ exceptions:
     justification: >-
       linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
       Packages: linux-libc-dev. Not reachability-analysed.
+
+# Per-file secret exceptions (see the Secret schema above). Each names one rule and one exact path.
+secret_exceptions:
+  - image_id: vendor-supabase-realtime
+    rule_id: private-key
+    path: /app/lib/gen_rpc-3.6.1/priv/ssl/ca.key.pem
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Bundled gen_rpc example PKI (2016 self-issued CA, CN 127.0.0.1, dated in the layer, no
+      README). runtime.exs only selects the ssl driver when GEN_RPC_SSL_SERVER_PORT is set, and then
+      reads GEN_RPC_CERTFILE, GEN_RPC_KEYFILE and GEN_RPC_CACERTFILE from env with no default; the
+      default driver is tcp. No release config references this directory. Precondition: the
+      consuming stack must never point GEN_RPC_*FILE at these files. Image read-only inspection, no
+      container run.
+  - image_id: vendor-supabase-realtime
+    rule_id: private-key
+    path: /app/lib/gen_rpc-3.6.1/priv/ssl/gen_rpc_master@127.0.0.1.key.pem
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Bundled gen_rpc example PKI (2016 self-issued CA, CN 127.0.0.1, dated in the layer, no
+      README). runtime.exs only selects the ssl driver when GEN_RPC_SSL_SERVER_PORT is set, and then
+      reads GEN_RPC_CERTFILE, GEN_RPC_KEYFILE and GEN_RPC_CACERTFILE from env with no default; the
+      default driver is tcp. No release config references this directory. Precondition: the
+      consuming stack must never point GEN_RPC_*FILE at these files. Image read-only inspection, no
+      container run.
+  - image_id: vendor-supabase-realtime
+    rule_id: private-key
+    path: /app/lib/gen_rpc-3.6.1/priv/ssl/gen_rpc_slave@127.0.0.1.key.pem
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Bundled gen_rpc example PKI (2016 self-issued CA, CN 127.0.0.1, dated in the layer, no
+      README). runtime.exs only selects the ssl driver when GEN_RPC_SSL_SERVER_PORT is set, and then
+      reads GEN_RPC_CERTFILE, GEN_RPC_KEYFILE and GEN_RPC_CACERTFILE from env with no default; the
+      default driver is tcp. No release config references this directory. Precondition: the
+      consuming stack must never point GEN_RPC_*FILE at these files. Image read-only inspection, no
+      container run.
+  - image_id: vendor-supabase-postgres
+    rule_id: private-key
+    path: /nix/store/2ryvqnw8g2lcrvij4hqlm1ihflw2x3hd-ipa-priv-key.pem
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Throwaway build input of libcamera 0.6.0 (generated to sign its IPA modules at build time);
+      only the .drv is in the image, the built output is not, and nothing references the key.
+      postgresql.conf has ssl = off with empty ssl_*_file settings and the entrypoint has no key
+      references. Not a Postgres credential.
+  - image_id: vendor-supabase-supavisor
+    rule_id: private-key
+    path: /etc/ssl/private/ssl-cert-snakeoil.key
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      Debian ssl-cert snakeoil key generated by the ssl-cert postinst (make-ssl-cert
+      generate-default-snakeoil); publicly known by design and unique to nothing. Supavisor loads
+      TLS material only from GLOBAL_DOWNSTREAM_CERT_PATH, GLOBAL_DOWNSTREAM_KEY_PATH,
+      DOWNSTREAM_SERVER_ECDSA_CERT and GLOBAL_UPSTREAM_CA_PATH, none with a default. Precondition:
+      the consuming stack must not point those at the snakeoil files.
+  - image_id: vendor-supabase-studio
+    rule_id: gcp-service-account
+    path: /app/apps/studio/.next/static/chunks/2734kpmydbhow.js
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      False positive: the match is a UI input placeholder string inside a compiled static JS chunk,
+      not a service account credential. The chunk name is a build hash and changes on every studio
+      re-pin, so a re-pin must re-check this entry.
