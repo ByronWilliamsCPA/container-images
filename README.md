@@ -74,7 +74,7 @@ not mirrored.
 | `ghcr.io/byronwilliamscpa/vendor-postgrest` | `v14.18` | `postgrest/postgrest` |
 | `ghcr.io/byronwilliamscpa/vendor-supabase-realtime` | `v2.143.3` | `supabase/realtime` |
 | `ghcr.io/byronwilliamscpa/vendor-supabase-storage-api` | `v1.81.0` | `supabase/storage-api` |
-| `ghcr.io/byronwilliamscpa/vendor-imgproxy` | `v3.31.4` | `darthsim/imgproxy` |
+| `ghcr.io/byronwilliamscpa/vendor-imgproxy` | `v4.0.18` | `darthsim/imgproxy` |
 | `ghcr.io/byronwilliamscpa/vendor-supabase-postgres-meta` | `v0.100.0` | `supabase/postgres-meta` |
 | `ghcr.io/byronwilliamscpa/vendor-supabase-edge-runtime` | `v1.77.4` | `supabase/edge-runtime` |
 | `ghcr.io/byronwilliamscpa/vendor-supabase-postgres` | `17.6.1.136` | `supabase/postgres` |

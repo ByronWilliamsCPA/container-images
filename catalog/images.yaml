@@ -964,15 +964,15 @@ images:
     upstream:
       registry: docker.io
       name: darthsim/imgproxy
-      # #ASSUME docker.io/darthsim/imgproxy:v3.31.4 is an immutable release tag and the
+      # #ASSUME docker.io/darthsim/imgproxy:v4.0.18 is an immutable release tag and the
       # digest below is the reviewed index for it.
-      # #VERIFY run `crane digest docker.io/darthsim/imgproxy:v3.31.4`; a different value
+      # #VERIFY run `crane digest docker.io/darthsim/imgproxy:v4.0.18`; a different value
       # means upstream re-pushed the tag. Re-review before updating the digest.
-      tag: "v3.31.4"
-      digest: "sha256:73c5dda13199745b0d2d00e4149d4a589c5b2e205dbf335ca05eca8276b54712"
+      tag: "v4.0.18"
+      digest: "sha256:03aec6708216c3e017d7ad3fb08eba11d6b83be65556262f8d6cd72803fefeb6"
     ghcr:
       name: vendor-imgproxy
-      tag: "v3.31.4"
+      tag: "v4.0.18"
     platform_compatibility:
       default: linux/amd64
       supported: [linux/amd64]
