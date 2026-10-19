@@ -19,6 +19,11 @@ mirrored images is `catalog/images.yaml`.
      `catalog/policies.yaml` with an expiry, a tracking issue and a
      justification. Exceptions are keyed by image id and CVE, not by digest, so
      re-pinning an image must re-review that image's exceptions in the same PR.
+   - A secret finding (Trivy `secret` scanner, such as a bundled private key) is
+     excepted with a `secret_exceptions` entry naming the rule and the exact
+     absolute file path. Before adding one, confirm the file is not used at
+     runtime or is a placeholder, and say so in the justification. The same
+     expiry, ticket and re-pin rules apply: a re-pin re-reviews these entries too.
 2. Validate your changes locally:
    ```bash
    python3 scripts/validate_catalog_schema.py
