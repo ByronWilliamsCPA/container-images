@@ -5,7 +5,7 @@ metadata:
   schema_version: "1.0"
   description: Scanner and exception policies for the A2 image promotion pipeline
   maintainer: ByronWilliamsCPA/container-images
-  last_updated: "2026-06-28"
+  last_updated: "2026-10-18"
 
 # Vulnerability scanner policy applied by publish-approved-image.yml (A2).
 # scripts/load_scanner_policy.py reads this file at promotion time and
@@ -118,4 +118,2364 @@ scanner_policy:
 #   expires:       str  -- ISO-8601 date after which the exception auto-expires
 #   ticket:        str  -- issue or ticket URL tracking the underlying fix
 #   justification: str  -- reason this cannot be fixed by upgrading the base
-exceptions: []
+#
+# Re-pin rule: exceptions are keyed by image_id and CVE, NOT by digest. Any change
+# to an image's upstream digest (a re-pin) MUST re-review that image's exceptions in
+# the same PR: re-scan the new digest, delete entries that no longer apply, and
+# refuse to carry forward entries for CVEs that were never reviewed against the new
+# bytes. Vendor-tier exceptions (vendor-*) are transport-copy exceptions: we cannot
+# patch those bytes, so each carries a short expiry and a tracking issue.
+exceptions:
+  - image_id: vendor-supabase-edge-runtime
+    cve_id: CVE-2026-13221
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/55
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-edge-runtime
+    cve_id: CVE-2026-42496
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/55
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-edge-runtime
+    cve_id: CVE-2026-8376
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/55
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-edge-runtime
+    cve_id: CVE-2026-103111
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/55
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpcre2-8-0. Not reachability-analysed.
+  - image_id: vendor-supabase-edge-runtime
+    cve_id: CVE-2026-42497
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/55
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-edge-runtime
+    cve_id: CVE-2026-48962
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/55
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-edge-runtime
+    cve_id: CVE-2026-57432
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/55
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-edge-runtime
+    cve_id: CVE-2026-57433
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/55
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-gotrue
+    cve_id: CVE-2026-14456
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/56
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libcrypto3, libssl3. Not reachability-analysed.
+  - image_id: vendor-supabase-gotrue
+    cve_id: CVE-2026-78667
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/56
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-gotrue
+    cve_id: CVE-2026-78669
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/56
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: golang.org/x/net, stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-gotrue
+    cve_id: CVE-2026-84304
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/56
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: google.golang.org/grpc. Not reachability-analysed.
+  - image_id: vendor-supabase-gotrue
+    cve_id: CVE-2026-84445
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/56
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: google.golang.org/grpc. Not reachability-analysed.
+  - image_id: vendor-supabase-gotrue
+    cve_id: CVE-2026-97031
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/56
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-11352
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-11586
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-12064
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-14456
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libcrypto3, libssl3. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-27145
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-32280
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-32281
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-32283
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-33630
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: c-ares. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-33810
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-33811
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-33814
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-33818
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-39820
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-39821
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-39822
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-39836
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-42499
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-42504
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-45447
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libcrypto3, libssl3. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-46600
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-56853
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-56858
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-56859
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-56860
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-56862
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-5773
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-6276
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-78667
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-78669
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-8286
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-8458
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-8925
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-8927
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-9547
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres
+    cve_id: CVE-2026-97031
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/58
+    justification: >-
+      Go dependency compiled into the upstream binary; clearing it needs an upstream rebuild. Severity
+      HIGH. Packages: stdlib. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-102992
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity CRITICAL.
+      Packages: piscina. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-104848
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity CRITICAL.
+      Packages: tinypool. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-104849
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity CRITICAL.
+      Packages: tinypool. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-13221
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-42496
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-8376
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-90711
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity CRITICAL.
+      Packages: proxy-addr. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-102276
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-102278
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-13149
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-13676
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-14257
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-16221
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-18446
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-25223
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fastify. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-33671
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: picomatch. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-42497
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-47219
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: find-my-way. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-48815
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: sigstore. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-48962
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-57432
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-57433
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-6321
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-6322
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-69152
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-69192
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: ip-address. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-75975
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-76169
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fastify. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-76172
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-84292
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-84428
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fastify. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-84469
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fastify. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-84504
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fastify. Not reachability-analysed.
+  - image_id: vendor-supabase-postgres-meta
+    cve_id: CVE-2026-9496
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/57
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: pacote. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-13221
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-42496
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-8376
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2025-59375
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-103111
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpcre2-8-0. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-11822
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libsqlite3-0. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-11824
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libsqlite3-0. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-11940
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpython3.13-minimal, libpython3.13-stdlib, python3.13, python3.13-minimal. Not
+      reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-14456
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libssl3t64, openssl, openssl-provider-legacy. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-25210
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-32316
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: jq, libjq1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-41992
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: gzip. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-42497
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-45186
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-48962
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-53612
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: bsdutils, libblkid1, liblastlog2-2, libmount1, libsmartcols1, libuuid1, login, mount,
+      util-linux. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-53613
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: bsdutils, libblkid1, liblastlog2-2, libmount1, libsmartcols1, libuuid1, login, mount,
+      util-linux. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-53614
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: bsdutils, libblkid1, liblastlog2-2, libmount1, libsmartcols1, libuuid1, login, mount,
+      util-linux. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-53615
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: bsdutils, libblkid1, liblastlog2-2, libmount1, libsmartcols1, libuuid1, login, mount,
+      util-linux. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-57432
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-57433
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      perl-base. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-58050
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libssh2-1t64. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-59885
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: python3-pyasn1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-59886
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: python3-pyasn1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-66046
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-76956
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-76957
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-77214
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-8286
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl4t64. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-84782
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libssl3t64, openssl, openssl-provider-legacy. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-86145
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpcre2-8-0. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-89157
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpcre2-8-0. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-89161
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpcre2-8-0. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-8927
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl4t64. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-92392
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: curl, libcurl4t64. Not reachability-analysed.
+  - image_id: vendor-supabase-realtime
+    cve_id: CVE-2026-93990
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/59
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-59873
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity CRITICAL.
+      Packages: tar. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-101916
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: @grpc/grpc-js. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-102276
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-102278
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-13149
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-13697
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: undici. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-14257
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-18446
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-19445
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: pyc, python3, python3-pyc, python3-pycache-pyc0. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-19481
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: @fastify/busboy. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-19484
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: @fastify/busboy. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-19534
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: undici. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-19553
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: pyc, python3, python3-pyc, python3-pycache-pyc0. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-33671
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: picomatch. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-48815
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: sigstore. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-59874
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: tar. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-59892
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: @opentelemetry/propagator-jaeger. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-69152
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-69192
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: ip-address. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-73566
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: tar. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-75899
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-75931
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-75975
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-76169
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fastify. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-76172
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-82049
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: pyc, python3, python3-pyc, python3-pycache-pyc0. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-84292
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fast-uri. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-84428
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fastify. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-84469
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fastify. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-84504
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: fastify. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-84961
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: undici. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-93990
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat. Not reachability-analysed.
+  - image_id: vendor-supabase-storage-api
+    cve_id: CVE-2026-9496
+    scanner: trivy
+    expires: "2026-11-01"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/60
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: pacote. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-102828
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity CRITICAL.
+      Packages: simple-git. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-102829
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity CRITICAL.
+      Packages: @simple-git/argv-parser. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2024-35887
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2024-50029
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2025-22039
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-102276
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-102278
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-102826
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: simple-git. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-102827
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: simple-git. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-13149
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-14257
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-19534
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: undici. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-23191
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-23447
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-23448
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-33671
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: picomatch. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-43198
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-48815
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: sigstore. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-68236
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-69152
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: brace-expansion. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-69192
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: ip-address. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-73566
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: tar. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-80521
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-80951
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-81000
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-81003
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89479
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89481
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89487
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89488
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89508
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89524
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89563
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89569
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89607
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89617
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89653
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89656
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89663
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89669
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89674
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89725
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89736
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89777
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89846
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89894
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89932
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89970
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-89980
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-90011
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-90049
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-93288
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-93787
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-94483
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: next. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-9496
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      Node dependency inside the upstream image; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: pacote. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-97417
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-98116
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-98260
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-98320
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-98323
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-98378
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-98417
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-studio
+    cve_id: CVE-2026-99999
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/61
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-13221
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: libperl5.36, perl, perl-base, perl-modules-5.36. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-42496
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: libperl5.36, perl, perl-base, perl-modules-5.36. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-8376
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity CRITICAL.
+      Packages: libperl5.36, perl, perl-base, perl-modules-5.36. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2024-28757
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2024-35887
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2024-50029
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2025-22039
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2025-59375
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2025-6020
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpam-modules, libpam-modules-bin, libpam-runtime, libpam0g. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2025-68973
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: gpgv. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-103111
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpcre2-8-0. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-23191
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-23447
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-23448
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-25210
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-33164
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libde265-0. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-42497
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      libperl5.36, perl, perl-base, perl-modules-5.36. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-43198
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-45186
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-4878
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libcap2. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-48962
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      libperl5.36, perl, perl-base, perl-modules-5.36. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-57432
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      libperl5.36, perl, perl-base, perl-modules-5.36. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-57433
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      Perl in the upstream Debian base layer; the service is not known to invoke Perl at request time
+      (inferred, not verified). A Debian fix exists but upstream has not rebuilt. Severity HIGH. Packages:
+      libperl5.36, perl, perl-base, perl-modules-5.36. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-63382
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libevent-2.1-7. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-63383
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libevent-2.1-7. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-63384
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libevent-2.1-7. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-63385
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libevent-2.1-7. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-63387
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libevent-2.1-7. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-63388
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libevent-2.1-7. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-66046
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-68236
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-80521
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-80951
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-81000
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-81003
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-86145
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpcre2-8-0. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89157
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpcre2-8-0. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89161
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libpcre2-8-0. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89479
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89481
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89487
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89488
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89508
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89524
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89563
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89569
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89607
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89617
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89653
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89656
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89663
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89669
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89674
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89725
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89736
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89777
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89846
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89894
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89932
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89970
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-89980
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-90011
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-90049
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-93288
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-93787
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-93990
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      OS package in the upstream base layer; clearing it needs an upstream rebuild. Severity HIGH.
+      Packages: libexpat1. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-97417
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-98116
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-98260
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-98320
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-98323
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-98378
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-98417
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.
+  - image_id: vendor-supabase-supavisor
+    cve_id: CVE-2026-99999
+    scanner: trivy
+    expires: "2026-11-17"
+    ticket: https://github.com/ByronWilliamsCPA/container-images/issues/62
+    justification: >-
+      linux-libc-dev is a kernel headers package; no kernel code runs inside a container. Severity HIGH.
+      Packages: linux-libc-dev. Not reachability-analysed.

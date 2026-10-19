@@ -14,6 +14,11 @@ mirrored images is `catalog/images.yaml`.
      `vendor-<component>`) must use an immutable version tag and must carry
      `upstream.digest` (`sha256:<64 hex>`, from `crane digest`). It is a
      transport copy of upstream, not a hardened image.
+   - Vendor images cannot be patched here. If the Trivy gate holds one back and
+     no newer upstream tag clears it, a time-boxed exception goes in
+     `catalog/policies.yaml` with an expiry, a tracking issue and a
+     justification. Exceptions are keyed by image id and CVE, not by digest, so
+     re-pinning an image must re-review that image's exceptions in the same PR.
 2. Validate your changes locally:
    ```bash
    python3 scripts/validate_catalog_schema.py
