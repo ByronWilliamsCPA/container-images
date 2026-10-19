@@ -824,15 +824,15 @@ images:
     upstream:
       registry: docker.io
       name: envoyproxy/envoy
-      # #ASSUME docker.io/envoyproxy/envoy:v1.39.1 is an immutable release tag and the
+      # #ASSUME docker.io/envoyproxy/envoy:v1.39.4 is an immutable release tag and the
       # digest below is the reviewed index for it.
-      # #VERIFY run `crane digest docker.io/envoyproxy/envoy:v1.39.1`; a different value
+      # #VERIFY run `crane digest docker.io/envoyproxy/envoy:v1.39.4`; a different value
       # means upstream re-pushed the tag. Re-review before updating the digest.
-      tag: "v1.39.1"
-      digest: "sha256:57e14a549d7bd43c8d3f6d03e8cfa653e037d4b38e133acd9b54f38c524401b4"
+      tag: "v1.39.4"
+      digest: "sha256:74bd4eb5629708d3fadca1a5e6b85d208f338d7bb54e06b69565905c5294cc01"
     ghcr:
       name: vendor-envoy
-      tag: "v1.39.1"
+      tag: "v1.39.4"
     platform_compatibility:
       default: linux/amd64
       supported: [linux/amd64]

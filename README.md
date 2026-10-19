@@ -69,7 +69,7 @@ not mirrored.
 | Image | Tag | Upstream |
 | --- | --- | --- |
 | `ghcr.io/byronwilliamscpa/vendor-supabase-studio` | `2026.10.12-sha-3699278` | `supabase/studio` |
-| `ghcr.io/byronwilliamscpa/vendor-envoy` | `v1.39.1` | `envoyproxy/envoy` |
+| `ghcr.io/byronwilliamscpa/vendor-envoy` | `v1.39.4` | `envoyproxy/envoy` |
 | `ghcr.io/byronwilliamscpa/vendor-supabase-gotrue` | `v2.197.0` | `supabase/gotrue` |
 | `ghcr.io/byronwilliamscpa/vendor-postgrest` | `v14.18` | `postgrest/postgrest` |
 | `ghcr.io/byronwilliamscpa/vendor-supabase-realtime` | `v2.143.3` | `supabase/realtime` |
