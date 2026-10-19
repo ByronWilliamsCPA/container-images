@@ -101,10 +101,30 @@ def test_yaml_ignore_file_carries_cves_and_exact_paths() -> None:
             "id": "private-key",
             "paths": [KEY_PATH],
             "statement": TICKET,
-            "expired_at": date(2026, 11, 17),
+            # expires 2026-11-17 is inclusive; Trivy's expired_at is exclusive.
+            "expired_at": date(2026, 11, 18),
         }
     ]
     assert "img" in text.splitlines()[1]
+
+
+def test_secret_exception_is_active_on_its_last_day_and_dropped_after() -> None:
+    entry = {
+        "image_id": "img",
+        "rule_id": "private-key",
+        "path": KEY_PATH,
+        "expires": "2026-11-17",
+        "ticket": TICKET,
+    }
+    last_day, _ = lsp._secret_exception(entry, "img", date(2026, 11, 17))
+    next_day, skip = lsp._secret_exception(entry, "img", date(2026, 11, 18))
+    assert last_day is not None
+    assert next_day is None
+    assert skip is not None
+    assert "expired" in skip
+    # The rendered Trivy expiry must start AFTER the last active day.
+    doc = yaml.safe_load(lsp._render_trivyignore_yaml([], [last_day], "img"))
+    assert doc["secrets"][0]["expired_at"] > date(2026, 11, 17)
 
 
 def test_yaml_ignore_file_with_no_exceptions_is_still_valid() -> None:

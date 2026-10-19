@@ -34,7 +34,7 @@ import os
 import re
 import sys
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -294,7 +294,11 @@ def _render_trivyignore_yaml(
                 "id": rule,
                 "paths": [path],
                 "statement": ticket or "Approved exception, see catalog/policies.yaml",
-                "expired_at": expiry,
+                # Trivy treats expired_at as the instant the entry stops applying
+                # (midnight at the start of that date), but ``expires`` is
+                # inclusive: the loader keeps the entry through its last day.
+                # Write the next day so both agree on the final day.
+                "expired_at": expiry + timedelta(days=1),
             }
             for rule, path, expiry, ticket in secrets
         ],
