@@ -824,7 +824,8 @@ jobs:
           python3 scripts/load_scanner_policy.py \
             --policy-file catalog/policies.yaml \
             --image-id "${IMAGE_ID}" \
-            --trivyignore-out .trivyignore
+            --trivyignore-out .trivyignore \
+            --trivyignore-yaml-out .trivyignore.yaml
 
       # RT-4: resolve the exact platform manifest to scan and publish. NOTHING
       # is published by this step -- the copy happens only after the gate below
@@ -984,6 +985,7 @@ jobs:
           SEVERITIES: ${{ steps.policy.outputs.trivy_severities }}
           IGNORE_UNFIXED: ${{ steps.policy.outputs.trivy_ignore_unfixed }}
           EXCEPTIONS: ${{ steps.policy.outputs.trivy_exception_count }}
+          SECRET_EXCEPTIONS: ${{ steps.policy.outputs.trivy_secret_exception_count }}
         run: |
           {
             echo "### Trivy gate: ${GATE_RESULT}"
@@ -992,6 +994,7 @@ jobs:
             echo "- Blocking severities: ${SEVERITIES}"
             echo "- Ignore unfixed: ${IGNORE_UNFIXED}"
             echo "- Active CVE exceptions: ${EXCEPTIONS}"
+            echo "- Active secret exceptions: ${SECRET_EXCEPTIONS}"
             echo ""
             echo '```'
             cat trivy-gate.txt
